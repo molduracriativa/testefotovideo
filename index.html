@@ -42,7 +42,7 @@
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
-          audio: true
+          audio: { echoCancellation: true, noiseSuppression: true }
         });
         video.srcObject = mediaStream;
       } catch (e) {
@@ -73,25 +73,26 @@
 
     document.getElementById("btnVideoStart").onclick = () => {
       videoBlobs = [];
-      // Correção: garantir áudio no Safari, Chrome e Firefox
-      const mimeTypes = [
-        "video/mp4",
+
+      const mimeOptions = [
         "video/webm;codecs=vp9,opus",
         "video/webm;codecs=vp8,opus",
-        "video/webm"
+        "video/webm",
+        "video/mp4"
       ];
 
-      let tipo = mimeTypes.find(t => MediaRecorder.isTypeSupported(t));
-      recorder = new MediaRecorder(mediaStream, { mimeType: tipo });
+      let escolhido = mimeOptions.find(t => MediaRecorder.isTypeSupported(t));
+
+      recorder = new MediaRecorder(mediaStream, { mimeType: escolhido });
 
       recorder.ondataavailable = (e) => videoBlobs.push(e.data);
 
-      recorder.onstop = async () => {
-        const fullBlob = new Blob(videoBlobs, { type: "video/mp4" });
+      recorder.onstop = () => {
+        const fullBlob = new Blob(videoBlobs, { type: escolhido });
         const url = URL.createObjectURL(fullBlob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "video_moldura.mp4";
+        a.download = "video_moldura" + (escolhido.includes("webm") ? ".webm" : ".mp4");
         a.click();
       };
 
