@@ -1,379 +1,164 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Crispoparte V14 — MP4 nativo (ffmpeg.wasm)</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moldura com Vídeo e Foto</title>
   <style>
-    :root{--accent:#25D366;--primary:#FF5722;--bg:#111}
-    *{box-sizing:border-box}
-    body{margin:0;background:#000;color:#fff;font-family:system-ui,Arial;height:100vh;display:flex;flex-direction:column}
-    .stage{position:relative;flex:1;display:flex;align-items:center;justify-content:center;background:#111}
-    video,#molduraPreview,#canvasPreview,#videoPreview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-    #molduraPreview{pointer-events:none;z-index:5}
-    .ui{position:absolute;bottom:18px;left:18px;right:18px;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:8px}
-    .controls{display:flex;gap:8px;align-items:center}
-    button{padding:10px 12px;border-radius:10px;border:none;background:#222;color:#fff;cursor:pointer}
-    button.primary{background:var(--accent);color:#000;font-weight:700}
-    .status{position:absolute;top:18px;left:18px;background:#0008;padding:6px 10px;border-radius:8px;font-size:13px}
-    .progress{position:fixed;left:0;right:0;bottom:0;height:6px;background:#222;display:none}
-    .progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#4cd964)}
-    @media (max-width:420px){ button{padding:8px 10px;font-size:14px} }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #000;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #container {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    video, canvas {
+      width: 100%;
+      border-radius: 10px;
+    }
+
+    .frame-selector {
+      display: flex;
+      gap: 10px;
+      margin: 10px 0;
+    }
+
+    button {
+      padding: 12px 18px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #1e90ff;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button:active {
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
+  <h2>Moldura Personalizada</h2>
 
-  <div class="stage">
-    <video id="camera" autoplay playsinline muted></video>
-    <canvas id="canvasPreview" style="display:none"></canvas>
-    <video id="videoPreview" controls style="display:none"></video>
-    <img id="molduraPreview" src="moldura1.png" alt="moldura" />
-    <div class="status" id="status">Aguardando</div>
-
-    <div class="ui">
-      <div class="controls">
-        <button id="switchBtn">🔄 Trocar</button>
-        <button id="photoBtn">📸 Foto</button>
-        <button id="recordBtn" class="primary">🎥 Gravar</button>
-        <div id="timer" style="padding:6px 10px;border-radius:8px;background:#0006">00:00</div>
-      </div>
-
-      <div class="controls">
-        <button id="m1Btn" class="primary">Moldura 1</button>
-        <button id="m2Btn">Moldura 2</button>
-        <a id="downloadBtn" style="text-decoration:none;color:#fff;padding:10px 12px;border-radius:10px;background:#333">📥 Salvar</a>
-      </div>
-    </div>
-
+  <div class="frame-selector">
+    <button onclick="setFrame('moldura1.png')">Moldura 1</button>
+    <button onclick="setFrame('moldura2.png')">Moldura 2</button>
   </div>
 
-  <div class="progress" id="progressBar"><i></i></div>
+  <div id="container">
+    <video id="camera" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
 
-  <canvas id="canvasFinal" style="display:none"></canvas>
+  <br>
 
-<script>
-/* ===========================
-   CONFIG
-   =========================== */
-const MERGE_SERVER = ''; // Se quiser fallback servidor: 'http://IP:4000/merge'
-const MOLDURAS = { m1:'moldura1.png', m2:'moldura2.png' };
+  <button id="photoBtn" onclick="capturePhoto()">📸 Foto</button>
+  <button id="recordBtn" onclick="toggleRecording()">🎥 Gravar Vídeo</button>
 
-/* STATE */
-let currentMoldura = MOLDURAS.m1;
-let currentMolduraImg = new Image(); currentMolduraImg.crossOrigin='anonymous'; currentMolduraImg.src = currentMoldura;
-let usingFront = true;
-let stream = null;
-let canvasFinal = document.getElementById('canvasFinal');
-let ctxFinal = canvasFinal.getContext('2d');
-let camera = document.getElementById('camera');
-let videoPreview = document.getElementById('videoPreview');
-let status = document.getElementById('status');
-let timerEl = document.getElementById('timer');
-let progressBar = document.getElementById('progressBar');
-let progressInner = progressBar.querySelector('i');
+  <script>
+    let stream;
+    let mediaRecorder;
+    let recordedChunks = [];
+    let recording = false;
 
-let recording = false;
-let mediaRecorder = null;
-let recordedChunks = [];
-let recordingStart = 0;
-let rafId = null;
-let finalMime='video/webm';
-let finalExt='webm';
-let timerInterval = null;
+    const camera = document.getElementById("camera");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
 
-let ffmpeg = null;
-let ffmpegLoaded = false;
+    let frameImg = new Image();
 
-let currentBlobUrl = null;
-let currentFileName = null;
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: true
+        });
 
-/* UI wiring */
-document.getElementById('switchBtn').addEventListener('click', switchCamera);
-document.getElementById('photoBtn').addEventListener('click', takePhoto);
-document.getElementById('recordBtn').addEventListener('click', toggleRecord);
-document.getElementById('m1Btn').addEventListener('click', ()=>setMoldura('m1'));
-document.getElementById('m2Btn').addEventListener('click', ()=>setMoldura('m2'));
-document.getElementById('downloadBtn').addEventListener('click', (e)=>{
-  if(!currentBlobUrl){ e.preventDefault(); alert('Arquivo não pronto.'); }
-});
+        camera.srcObject = stream;
 
-/* init */
-setMoldura('m1');
-setStatus('Aguardando');
-initCamera(); // try immediate; user agents sometimes require user gesture
+        camera.onloadedmetadata = () => {
+          canvas.width = camera.videoWidth;
+          canvas.height = camera.videoHeight;
+          drawLoop();
+        };
+      } catch (e) {
+        alert("Erro ao acessar câmera: " + e);
+      }
+    }
 
-/* ===== Camera init ===== */
-async function initCamera(tryAudio=true){
-  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
-  setStatus('Solicitando câmera' + (tryAudio ? ' + microfone':''));
-  const constraints = { video: { facingMode: usingFront ? 'user' : 'environment', width:{ideal:1080}, height:{ideal:1920} }, audio: tryAudio };
-  try {
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    camera.srcObject = stream;
-    camera.onloadedmetadata = ()=>{ camera.play().catch(()=>{}); setStatus('Pronto'); prepareCanvas(); };
-  } catch(err){
-    console.warn('getUserMedia failed', err);
-    if(tryAudio) return initCamera(false);
-    setStatus('Falha ao obter câmera/microfone');
-    alert('Não foi possível acessar câmera/microfone. Verifique permissões.');
-  }
-}
+    function setFrame(file) {
+      frameImg.src = file;
+    }
 
-function prepareCanvas(){
-  canvasFinal.width = 1080;
-  canvasFinal.height = 1920;
-}
+    function drawLoop() {
+      requestAnimationFrame(drawLoop);
+      ctx.drawImage(camera, 0, 0, canvas.width, canvas.height);
+      if (frameImg.src) ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
+    }
 
-/* ===== Moldura ===== */
-function setMoldura(key){
-  currentMoldura = MOLDURAS[key];
-  currentMolduraImg.src = currentMoldura;
-  document.getElementById('m1Btn').classList.toggle('primary', key === 'm1');
-  document.getElementById('m2Btn').classList.toggle('primary', key === 'm2');
-}
+    function capturePhoto() {
+      const link = document.createElement("a");
+      link.download = "foto.png";
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    }
 
-/* ===== Draw loop ===== */
-function drawLoop(w=1080,h=1920){
-  const vw = camera.videoWidth, vh = camera.videoHeight;
-  if(!vw || !vh) return;
-  const vidRatio = vw / vh, canvasRatio = w / h;
-  let dw, dh, dx, dy;
-  if(vidRatio > canvasRatio){ dh = h; dw = h * vidRatio; dx = (w - dw)/2; dy = 0; }
-  else { dw = w; dh = w / vidRatio; dx = 0; dy = (h - dh)/2; }
+    function toggleRecording() {
+      if (!recording) startRecording(); else stopRecording();
+    }
 
-  ctxFinal.clearRect(0,0,w,h);
-  if(usingFront){
-    ctxFinal.save();
-    ctxFinal.scale(-1,1);
-    ctxFinal.drawImage(camera, -dx - dw, dy, dw, dh);
-    ctxFinal.restore();
-  } else {
-    ctxFinal.drawImage(camera, dx, dy, dw, dh);
-  }
+    function startRecording() {
+      recordedChunks = [];
 
-  if(currentMolduraImg && currentMolduraImg.complete) ctxFinal.drawImage(currentMolduraImg, 0, 0, w, h);
-}
+      const canvasStream = canvas.captureStream(30);
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) canvasStream.addTrack(audioTrack);
 
-/* ===== Photo ===== */
-function takePhoto(){
-  flash();
-  canvasFinal.width = 1080; canvasFinal.height = 1920;
-  drawLoop(1080,1920);
-  canvasFinal.toBlob(blob=>{
-    if(!blob || blob.size < 100) { alert('Erro ao gerar foto'); return; }
-    const url = URL.createObjectURL(blob);
-    currentBlobUrl = url;
-    currentFileName = `foto_${Date.now()}.png`;
-    setStatus('Foto pronta — toque em Salvar');
-    triggerDownload(url, currentFileName);
-    showPreview('image', url);
-  }, 'image/png');
-}
-
-/* ===== Recording ===== */
-function toggleRecord(){ recording ? stopRecording() : startRecording(); }
-
-function startRecording(){
-  if(!stream){ alert('Câmera não iniciada'); return; }
-  recording = true;
-  recordedChunks = [];
-  setStatus('Gravando...');
-  document.getElementById('recordBtn').textContent = '⏹ Parar';
-  recordingStart = Date.now();
-  canvasFinal.width = 1080; canvasFinal.height = 1920;
-
-  (function loop(){ if(!recording) return; drawLoop(1080,1920); rafId = requestAnimationFrame(loop); })();
-
-  const canvasStream = canvasFinal.captureStream(30);
-
-  const audioTracks = stream ? stream.getAudioTracks() : [];
-  if(audioTracks && audioTracks.length){
-    try {
-      audioTracks.forEach(t => {
-        try{ canvasStream.addTrack(t.clone ? t.clone() : t); } catch(e){ try{ canvasStream.addTrack(t); }catch(_){}} 
+      mediaRecorder = new MediaRecorder(canvasStream, {
+        mimeType: "video/mp4"
       });
-    } catch(e){ console.warn('attach audioTracks error', e); }
-  }
 
-  const candidates = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
-  let chosen = candidates.find(m=>{ try{ return MediaRecorder.isTypeSupported(m); } catch(e){ return false; } }) || '';
-  finalMime = chosen || 'video/webm';
-  finalExt = finalMime.includes('mp4') ? 'mp4' : 'webm';
+      mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+      mediaRecorder.onstop = saveVideo;
 
-  try {
-    mediaRecorder = finalMime ? new MediaRecorder(canvasStream, { mimeType: finalMime }) : new MediaRecorder(canvasStream);
-  } catch(err){
-    console.error('MediaRecorder init failed', err);
-    alert('Impossível iniciar MediaRecorder neste dispositivo.');
-    recording = false;
-    document.getElementById('recordBtn').textContent = '🎥 Gravar';
-    return;
-  }
+      mediaRecorder.start();
+      recording = true;
+      document.getElementById("recordBtn").innerText = "⏹ Parar";
+    }
 
-  mediaRecorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
-  mediaRecorder.onstop = onRecordingStop;
-  mediaRecorder.start(1000);
+    function stopRecording() {
+      mediaRecorder.stop();
+      recording = false;
+      document.getElementById("recordBtn").innerText = "🎥 Gravar Vídeo";
+    }
 
-  timerInterval = setInterval(()=>{ const s=Math.floor((Date.now()-recordingStart)/1000); timerEl.textContent = `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; },500);
-}
-
-function stopRecording(){
-  recording=false;
-  document.getElementById('recordBtn').textContent = '🎥 Gravar';
-  setStatus('Parando gravação...');
-  try{ if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); }catch(e){}
-  try{ cancelAnimationFrame(rafId); }catch(e){}
-  clearInterval(timerInterval);
-  timerEl.textContent = '00:00';
-}
-
-/* ===== when recording stops ===== */
-async function onRecordingStop(){
-  setStatus('Finalizando...');
-  const blob = new Blob(recordedChunks, { type: finalMime || 'video/webm' });
-  if(!blob || blob.size < 1000){ alert('Erro: arquivo inválido'); return; }
-
-  // Attempt MP4 conversion via ffmpeg.wasm
-  setStatus('Convertendo para MP4 (local)...');
-  showProgress(3);
-
-  try {
-    const mp4Url = await convertToMp4WithFFmpeg(blob);
-    if(mp4Url){
-      currentBlobUrl = mp4Url;
-      currentFileName = `video_${Date.now()}.mp4`;
-      document.getElementById('downloadBtn').href = mp4Url;
-      document.getElementById('downloadBtn').download = currentFileName;
-      showPreview('video', mp4Url);
-      setStatus('MP4 pronto — toque em Salvar');
-      hideProgress();
-      return;
-    } else {
-      // fallback to webm
+    function saveVideo() {
+      const blob = new Blob(recordedChunks, { type: "video/mp4" });
       const url = URL.createObjectURL(blob);
-      currentBlobUrl = url; currentFileName = `video_${Date.now()}.webm`;
-      document.getElementById('downloadBtn').href = url;
-      document.getElementById('downloadBtn').download = currentFileName;
-      showPreview('video', url);
-      setStatus('Conversão falhou — WebM disponível');
-      hideProgress();
-      return;
+
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "video.mp4";
+      link.click();
+
+      URL.revokeObjectURL(url);
     }
-  } catch(err){
-    console.error('conversion error', err);
-    const url = URL.createObjectURL(blob);
-    currentBlobUrl = url; currentFileName = `video_${Date.now()}.webm`;
-    document.getElementById('downloadBtn').href = url;
-    document.getElementById('downloadBtn').download = currentFileName;
-    showPreview('video', url);
-    setStatus('Erro na conversão local. WebM disponível.');
-    hideProgress();
-  }
-}
 
-/* ===== preview and download helpers ===== */
-function showPreview(type, url){
-  videoPreview.src = url; videoPreview.style.display = 'block'; videoPreview.play().catch(()=>{});
-}
-
-function triggerDownload(url, filename){
-  try {
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    // keep url for manual download preview
-    document.getElementById('downloadBtn').href = url;
-    document.getElementById('downloadBtn').download = filename;
-  } catch(e){
-    console.warn('download failed', e);
-  }
-}
-
-/* ===== ffmpeg.wasm integration ===== */
-async function ensureFFmpeg(){
-  if(ffmpegLoaded) return;
-  setStatus('Carregando ffmpeg.wasm (pode demorar)...');
-  progressBar.style.display='block'; showProgress(5);
-
-  if(!window.FFmpeg && !window.createFFmpeg){
-    // load official script
-    await new Promise((res, rej)=>{
-      const s = document.createElement('script');
-      s.src = 'https://unpkg.com/@ffmpeg/ffmpeg@0.11.8/dist/ffmpeg.min.js';
-      s.onload = res; s.onerror = rej;
-      document.head.appendChild(s);
-    });
-  }
-
-  const { createFFmpeg } = window.FFmpeg || window;
-  if(!createFFmpeg) throw new Error('FFmpeg not available');
-
-  ffmpeg = createFFmpeg({ log: false, corePath: 'https://unpkg.com/@ffmpeg/core@0.11.1/dist/ffmpeg-core.js' });
-  ffmpeg.setProgress(p => { if(p && p.ratio) showProgress(Math.round(p.ratio*80)+10); });
-  await ffmpeg.load();
-  ffmpegLoaded = true;
-  setStatus('ffmpeg.wasm carregado');
-  showProgress(12);
-}
-
-async function convertToMp4WithFFmpeg(webmBlob){
-  try {
-    await ensureFFmpeg();
-  } catch(e){
-    console.warn('ffmpeg load failed', e);
-    return null;
-  }
-
-  const inName = 'in.webm';
-  const outName = 'out.mp4';
-  const array = new Uint8Array(await webmBlob.arrayBuffer());
-  ffmpeg.FS('writeFile', inName, array);
-  setStatus('Transcodificando — aguarde...');
-  try {
-    // try H.264/AAC transcode
-    await ffmpeg.run('-i', inName, '-c:v','libx264','-preset','veryfast','-c:a','aac','-b:a','128k','-movflags','+faststart', outName);
-  } catch(err){
-    console.warn('libx264 transcode failed, trying copy fallback', err);
-    try {
-      await ffmpeg.run('-i', inName, '-c','copy', outName);
-    } catch(err2){
-      console.error('copy fallback failed', err2);
-      try { ffmpeg.FS('unlink', inName); } catch(e){}
-      return null;
-    }
-  }
-
-  const outData = ffmpeg.FS('readFile', outName);
-  const outBlob = new Blob([outData.buffer], { type: 'video/mp4' });
-  const outUrl = URL.createObjectURL(outBlob);
-
-  // cleanup
-  try { ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName); } catch(e){}
-  return outUrl;
-}
-
-/* ===== progress UI ===== */
-function showProgress(p){ progressInner.style.width = `${p}%`; progressBar.style.display='block'; }
-function hideProgress(){ progressBar.style.display='none'; progressInner.style.width='0%'; }
-
-/* ===== other helpers ===== */
-function setStatus(t){ status.innerText = t; }
-function flash(){ const f=document.getElementById('flash'); if(!f) return; f.style.opacity=1; setTimeout(()=>f.style.opacity=0,150); }
-
-/* ===== optional server upload (fallback) ===== */
-async function uploadMergeServer(videoBlob, audioBlob=null){
-  if(!MERGE_SERVER) throw new Error('MERGE_SERVER não configurado');
-  setStatus('Enviando ao servidor para mesclar...');
-  const fd = new FormData();
-  fd.append('video', videoBlob, 'video.webm');
-  if(audioBlob) fd.append('audio', audioBlob, 'audio.webm');
-  const r = await fetch(MERGE_SERVER, { method:'POST', body: fd });
-  if(!r.ok) throw new Error('Servidor retornou erro ' + r.status);
-  const blob = await r.blob();
-  const url = URL.createObjectURL(blob);
-  return url;
-}
-</script>
-
+    setFrame("moldura1.png");
+    startCamera();
+  </script>
 </body>
 </html>
