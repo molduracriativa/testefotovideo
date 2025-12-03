@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V4 - Final</title>
+  <title>Crispoparte V5 - Robusto</title>
   <style>
     :root {
       --accent: #25D366;
@@ -216,7 +216,7 @@
       molduraPreview.src = currentMolduraUrl;
     }
 
-    // --- Câmera (Robusta com Fallback) ---
+    // --- Câmera (Máxima Robustez: Restrições em Camadas) ---
     async function initCamera(tryAudio = true) {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
@@ -224,23 +224,39 @@
       }
       errorMsg.innerText = "Solicitando permissões...";
 
-      let constraints = { video: { facingMode: usingFrontCamera ? 'user' : 'environment' } };
-      if (tryAudio) { constraints.audio = true; }
+      const currentFacingMode = usingFrontCamera ? 'user' : 'environment';
+      
+      // *** CAMADAS DE RESTRIÇÕES PARA MÁXIMA COMPATIBILIDADE ***
+      // 1. Tenta 720p (boa qualidade)
+      // 2. Tenta 480p (compatibilidade máxima)
+      // 3. Tenta sem restrição de resolução (padrão do navegador)
+      const constraintsList = [
+        { video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } } },
+        { video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } } },
+        { video: { facingMode: currentFacingMode } }
+      ];
 
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        handleStreamSuccess(stream);
-      } catch (err) {
-        console.warn("Erro ao iniciar câmera (Audio=" + tryAudio + "):", err);
-        
-        if (tryAudio) {
-           errorMsg.innerText = "Erro no áudio. Tentando iniciar sem microfone...";
-           await initCamera(false); 
-        } else {
-           const errMsg = `ERRO: ${err.name} - ${err.message}`;
-           errorMsg.innerText = `FALHA CRÍTICA! Erro: ${err.name}`;
-           alert(errMsg); 
+      for (const videoConstraints of constraintsList) {
+        let constraints = videoConstraints;
+        if (tryAudio) { constraints.audio = true; }
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          handleStreamSuccess(stream);
+          return; // Sai da função se for bem-sucedido
+        } catch (err) {
+          console.warn(`Tentativa falhou com restrições:`, constraints, `Erro: ${err.name}`);
         }
+      }
+
+      // Se todas as tentativas falharem
+      if (tryAudio) {
+           errorMsg.innerText = "Erro no áudio. Tentando iniciar sem microfone...";
+           await initCamera(false); // Última tentativa sem áudio
+      } else {
+           const errMsg = `FALHA CRÍTICA! A câmera não pôde ser inicializada.`;
+           errorMsg.innerText = errMsg;
+           alert(errMsg); 
       }
     }
 
@@ -259,7 +275,7 @@
         };
     }
 
-    // FIX: Atraso de 1000ms para o erro NotReadableError
+    // FIX: Atraso de 1000ms para o erro NotReadableError (Android/Motorola)
     async function switchCamera() {
       if (isRecording) stopRecording(); 
       usingFrontCamera = !usingFrontCamera;
@@ -314,6 +330,7 @@
         }
 
         const preferredMimeTypes = [
+            'video/mp4;codecs=avc1.42001E', // Padrão H.264 seguro para iOS/Android
             'video/mp4',                   
             'video/webm;codecs=vp9',       
             'video/webm;codecs=vp8',       
@@ -368,8 +385,7 @@
     }
 
     function finishVideo() {
-      // *** CORREÇÃO APLICADA AQUI: Usa apenas o tipo principal (video/mp4 ou video/webm) ***
-      // Isso simplifica o Blob e aumenta a compatibilidade com o sistema de arquivos do Android/iOS.
+      // Simplifica o MIME Type para aumentar a compatibilidade com o sistema de arquivos (resolve o erro de "não foi possível enviar")
       const simpleMimeType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
       const blob = new Blob(recordedChunks, { type: simpleMimeType }); 
       
@@ -436,7 +452,6 @@
           const url = URL.createObjectURL(blob);
           dBtn.href = url; dBtn.download = `video.${ext}`;
           
-          // Usa o tipo do Blob real para o compartilhamento 
           sBtn.onclick = () => shareFile(blob, `video.${ext}`, blob.type); 
       }
     }
@@ -451,7 +466,6 @@
         }
         
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            // Tenta o compartilhamento nativo
             navigator.share({ files: [file], title: 'Crispoparte' }).catch(e => {
                 console.error("Erro no compartilhamento:", e);
                 // Se o compartilhamento falhar, cai para o download como backup
