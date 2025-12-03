@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V10 - FINAL</title>
+  <title>Crispoparte V11 - Final</title>
   <style>
     :root {
       --accent: #25D366;
@@ -138,7 +138,7 @@
       <div class="ui-layer" id="resultUI" style="display: none; justify-content: flex-end; align-items: center;">
         <div id="postCaptureActions">
           <a id="downloadBtn" class="action-btn btn-save">📥 Baixar / Salvar</a>
-          <button id="newPhotoBtn" class="action-btn btn-new">🔄 Novo</button>
+          <button id="shareManualBtn" class="action-btn btn-new">📱 Compartilhar no WhatsApp</button>
         </div>
       </div>
     </div>
@@ -170,9 +170,10 @@
     let finalFileExtension = null;
     
     // VARIÁVEIS CRÍTICAS
-    let currentBlob = null;       // CRÍTICO: Armazena o Blob do arquivo atual
+    let currentBlob = null;       // Armazena o Blob do arquivo atual
     let currentBlobUrl = null;    // Armazena a URL para o preview/revogação
     let currentFileName = null;   // Armazena o nome de arquivo único
+    let currentFileType = null;   // Armazena o tipo ('image' ou 'video')
 
     // --- DOM Elements ---
     const video = document.getElementById('camera');
@@ -190,12 +191,14 @@
     const recordingTimer = document.getElementById('recordingTimer');
     const errorMsg = document.getElementById('errorMsg');
     const downloadBtn = document.getElementById('downloadBtn');
+    
+    const shareManualBtn = document.getElementById('shareManualBtn');
+
 
     // --- Events ---
     setMoldura(document.getElementById('m1Btn'), 'm1');
     document.getElementById('startBtn').addEventListener('click', () => initCamera(true)); 
     document.getElementById('switchBtn').addEventListener('click', switchCamera);
-    document.getElementById('newPhotoBtn').addEventListener('click', resetCamera);
     document.getElementById('m1Btn').addEventListener('click', (e) => setMoldura(e.target, 'm1'));
     document.getElementById('m2Btn').addEventListener('click', (e) => setMoldura(e.target, 'm2'));
     document.getElementById('modePhoto').addEventListener('click', () => setMode('photo'));
@@ -209,41 +212,52 @@
         }
     });
 
-    // CRÍTICO: Listener de download (Ação Forçada)
-    downloadBtn.addEventListener('click', triggerDownload);
+    // Listener para o botão de compartilhamento manual
+    shareManualBtn.addEventListener('click', showShareInstructions);
     
-    // --- Download Programático (Última Esperança) ---
-    function triggerDownload(e) {
-        // Previne o comportamento padrão do link para garantir o JS assume o controle
-        e.preventDefault(); 
-        
-        const { currentBlob: blob, currentFileName: filename } = window;
-        
-        if (!blob || !filename) {
-            alert("Erro: Arquivo não encontrado para download. Tente uma nova gravação.");
+    // Listener de Download (Apenas para garantir que o link só funcione quando tiver conteúdo)
+    downloadBtn.addEventListener('click', (e) => {
+        // Se ainda não tem href definido ou é apenas '#', alerta.
+        if (!downloadBtn.href || downloadBtn.href.includes('#')) {
+            e.preventDefault();
+            alert("Aguarde a finalização do processamento antes de clicar.");
+        }
+        // Caso contrário, deixa o link funcionar para visualização (com download definido)
+    });
+
+
+    // --- Instrução de Compartilhamento Manual ---
+    function showShareInstructions() {
+        if (!currentFileName) {
+            alert("Nenhum arquivo capturado para compartilhar.");
             return;
         }
 
-        // 1. Cria a URL do objeto APENAS NO MOMENTO DO DOWNLOAD (Evita cache)
-        const url = URL.createObjectURL(blob);
+        const typeText = currentFileType === 'image' ? 'a Foto' : 'o Vídeo';
+
+        const instructions = `
+        Atenção: O compartilhamento direto via WhatsApp falhou devido a restrições de segurança do seu aparelho.
+
+        ✅ ${typeText} foi SALVO como "${currentFileName}" na sua galeria (pasta "Download" ou "Filmes").
+
+        ---
         
-        // 2. Cria um link temporário
-        const tempLink = document.createElement('a');
-        tempLink.style.display = 'none';
+        Siga estes passos para compartilhar:
         
-        // 3. Define o HREF e o download
-        tempLink.href = url;
-        tempLink.download = filename;
+        1. Saia desta tela.
+        2. Abra o WhatsApp.
+        3. Selecione o contato.
+        4. Clique no ícone de Anexo (📎).
+        5. Escolha Galeria/Fotos ou Documentos e encontre o arquivo "${currentFileName}".
+        `;
+
+        alert(instructions);
         
-        // 4. Clica e remove (Garante que o download use o Blob atual)
-        document.body.appendChild(tempLink);
-        tempLink.click();
-        document.body.removeChild(tempLink);
-        
-        // 5. Revoga a URL imediatamente após o clique para liberar a memória
-        URL.revokeObjectURL(url); 
+        // Reinicia a câmera após o usuário ter lido a instrução
+        resetCamera();
     }
-    
+
+
     // --- Funções Principais de Câmera e Captura ---
     
     function setMode(mode) {
@@ -430,7 +444,7 @@
       showResult('video', blob);
     }
 
-    // --- Lógica de Resultado e Download (CORREÇÃO DE ARMAZENAMENTO) ---
+    // --- Lógica de Resultado e Download (Correção de Salvar na Galeria) ---
 
     function showResult(type, blob = null) {
       video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
@@ -438,14 +452,15 @@
       
       const timestamp = Date.now(); 
 
-      // 1. CRÍTICO: REVOGA A URL ANTERIORMENTE ATIVA para liberar a memória e cache
+      // 1. REVOGA A URL ANTERIORMENTE ATIVA para liberar a memória e cache
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
           URL.revokeObjectURL(currentBlobUrl); 
       }
       currentBlobUrl = null;
 
-      // 2. Armazena o Blob e o Nome de Arquivo (Download é ativado no listener)
+      // 2. Armazena o Blob, Tipo e Nome de Arquivo
       currentBlob = blob;
+      currentFileType = type;
 
       if (type === 'image') {
           canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
@@ -454,19 +469,31 @@
           canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
           const ext = finalFileExtension || 'webm'; 
           currentFileName = `video_${timestamp}.${ext}`;
-          
-          // CRÍTICO: Armazena a URL do preview para revogação futura
-          currentBlobUrl = videoPreview.src; 
+          currentBlobUrl = videoPreview.src; // URL de preview
       }
       
-      // CRÍTICO: Garante que o botão não tem href nem download para evitar cache
-      downloadBtn.removeAttribute('href');
-      downloadBtn.removeAttribute('download');
+      // 3. CRÍTICO: Executa o download imediatamente após a criação do blob
+      // Isso é o que garante que o arquivo vá para a galeria
+      const tempUrl = URL.createObjectURL(blob);
+      const tempLink = document.createElement('a');
+      tempLink.style.display = 'none';
+      tempLink.href = tempUrl;
+      tempLink.download = currentFileName;
+      
+      document.body.appendChild(tempLink);
+      tempLink.click();
+      document.body.removeChild(tempLink);
+      // Revoga a URL do download forçado (a URL do preview fica em currentBlobUrl)
+      URL.revokeObjectURL(tempUrl); 
+      
+      // 4. Atualiza o botão DownloadBtn para ser o link de visualização e indicar sucesso
+      downloadBtn.href = currentBlobUrl || '#'; 
+      downloadBtn.download = currentFileName; 
+      downloadBtn.innerText = `✅ Salvo! Clique para Visualizar`;
     }
 
 
     function resetCamera() {
-      // REVOGA A URL ATIVA ao voltar para a câmera
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
           URL.revokeObjectURL(currentBlobUrl);
       }
@@ -474,9 +501,9 @@
       currentBlob = null;
       currentFileName = null;
       
-      // Limpa o link do botão de download
-      downloadBtn.removeAttribute('href');
-      downloadBtn.removeAttribute('download');
+      downloadBtn.href = '#';
+      downloadBtn.download = '';
+      downloadBtn.innerText = `📥 Baixar / Salvar`;
 
 
       canvasPreview.style.display = 'none'; videoPreview.style.display = 'none'; videoPreview.pause();
@@ -485,7 +512,7 @@
       errorMsg.innerText = "";
     }
     
-    // --- Funções Auxiliares (Mantidas) ---
+    // --- Funções Auxiliares (Desenho e Timer) ---
 
     function updateTimer() {
         const diff = Math.floor((Date.now() - recordingStartTime) / 1000);
