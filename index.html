@@ -3,70 +3,78 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moldura com Vídeo e Foto</title>
+  <title>Moldura - Foto & Vídeo</title>
   <style>
     body {
       margin: 0;
+      padding: 0;
+      background: #111;
       font-family: Arial, sans-serif;
-      background: #000;
       color: #fff;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
       height: 100vh;
-      overflow: hidden;
     }
 
-    #container {
+    h2 {
+      margin-top: 15px;
+    }
+
+    #preview-area {
       position: relative;
       width: 100%;
       max-width: 420px;
+      margin-top: 10px;
     }
 
     video, canvas {
       width: 100%;
-      border-radius: 10px;
+      border-radius: 16px;
     }
 
-    .frame-selector {
+    .frame-buttons, .control-buttons {
       display: flex;
+      justify-content: center;
       gap: 10px;
-      margin: 10px 0;
+      margin-top: 12px;
     }
 
     button {
-      padding: 12px 18px;
-      font-size: 16px;
-      border: none;
-      border-radius: 8px;
       background: #1e90ff;
-      color: #fff;
+      border: none;
+      padding: 12px 16px;
+      color: white;
+      border-radius: 10px;
+      font-size: 16px;
       cursor: pointer;
     }
 
-    button:active {
-      opacity: 0.7;
-    }
+    button:active { opacity: 0.7; }
   </style>
 </head>
 <body>
+
   <h2>Moldura Personalizada</h2>
 
-  <div class="frame-selector">
+  <!-- SELEÇÃO DE MOLDURA -->
+  <div class="frame-buttons">
     <button onclick="setFrame('moldura1.png')">Moldura 1</button>
     <button onclick="setFrame('moldura2.png')">Moldura 2</button>
   </div>
 
-  <div id="container">
+  <!-- CÂMERA + CANVAS -->
+  <div id="preview-area">
     <video id="camera" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
   </div>
 
-  <br>
-
-  <button id="photoBtn" onclick="capturePhoto()">📸 Foto</button>
-  <button id="recordBtn" onclick="toggleRecording()">🎥 Gravar Vídeo</button>
+  <!-- BOTÕES FOTO & VÍDEO -->
+  <div class="control-buttons">
+    <button onclick="capturePhoto()">📸 Foto</button>
+    <button id="recordBtn" onclick="toggleRecording()">🎥 Vídeo</button>
+  </div>
 
   <script>
     let stream;
@@ -92,19 +100,19 @@
         camera.onloadedmetadata = () => {
           canvas.width = camera.videoWidth;
           canvas.height = camera.videoHeight;
-          drawLoop();
+          draw();
         };
-      } catch (e) {
-        alert("Erro ao acessar câmera: " + e);
+      } catch (err) {
+        alert("Erro ao acessar câmera: " + err);
       }
     }
 
-    function setFrame(file) {
-      frameImg.src = file;
+    function setFrame(src) {
+      frameImg.src = src;
     }
 
-    function drawLoop() {
-      requestAnimationFrame(drawLoop);
+    function draw() {
+      requestAnimationFrame(draw);
       ctx.drawImage(camera, 0, 0, canvas.width, canvas.height);
       if (frameImg.src) ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
     }
@@ -117,7 +125,8 @@
     }
 
     function toggleRecording() {
-      if (!recording) startRecording(); else stopRecording();
+      if (!recording) startRecording();
+      else stopRecording();
     }
 
     function startRecording() {
@@ -127,9 +136,7 @@
       const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) canvasStream.addTrack(audioTrack);
 
-      mediaRecorder = new MediaRecorder(canvasStream, {
-        mimeType: "video/mp4"
-      });
+      mediaRecorder = new MediaRecorder(canvasStream, { mimeType: "video/webm" });
 
       mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
       mediaRecorder.onstop = saveVideo;
@@ -142,17 +149,17 @@
     function stopRecording() {
       mediaRecorder.stop();
       recording = false;
-      document.getElementById("recordBtn").innerText = "🎥 Gravar Vídeo";
+      document.getElementById("recordBtn").innerText = "🎥 Vídeo";
     }
 
     function saveVideo() {
-      const blob = new Blob(recordedChunks, { type: "video/mp4" });
+      const blob = new Blob(recordedChunks, { type: "video/webm" });
       const url = URL.createObjectURL(blob);
 
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "video.mp4";
-      link.click();
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "video.webm";
+      a.click();
 
       URL.revokeObjectURL(url);
     }
@@ -160,5 +167,6 @@
     setFrame("moldura1.png");
     startCamera();
   </script>
+
 </body>
 </html>
