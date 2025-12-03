@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V6 - Final</title>
+  <title>Crispoparte V7 - Final</title>
   <style>
     :root {
       --accent: #25D366;
@@ -91,6 +91,8 @@
     #startBtn { padding: 18px 32px; font-size: 20px; background: var(--primary); color: white; border: none; border-radius: 50px; cursor: pointer; }
 
     #postCaptureActions { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; pointer-events: auto; }
+    
+    /* REMOVE HREF/DOWNLOAD DO HTML - O JS CUIDARÁ DISSO */
     .action-btn { width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 16px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none; display: inline-block; }
     .btn-save { background: var(--accent); color: #fff; }
     .btn-new { background: #555; color: #fff; }
@@ -165,7 +167,10 @@
     
     let finalMimeType = null;
     let finalFileExtension = null;
-    let currentBlobUrl = null; // <-- NOVO: Rastreia a URL atual do objeto para revogar (limpar cache)
+    let currentBlobUrl = null; 
+    
+    // NOVO: Variável para armazenar o Blob/URL e nome do arquivo atual para o download programático
+    let currentDownloadData = { url: null, filename: null, type: null, blob: null }; 
 
     // --- DOM Elements ---
     const video = document.getElementById('camera');
@@ -182,6 +187,8 @@
     const captureBtn = document.getElementById('captureBtn');
     const recordingTimer = document.getElementById('recordingTimer');
     const errorMsg = document.getElementById('errorMsg');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const shareBtn = document.getElementById('shareBtn'); // Pegando o botão de compartilhar
 
     // --- Events ---
     setMoldura(document.getElementById('m1Btn'), 'm1');
@@ -193,16 +200,50 @@
     document.getElementById('modePhoto').addEventListener('click', () => setMode('photo'));
     document.getElementById('modeVideo').addEventListener('click', () => setMode('video'));
     
-    // Botão Principal - Lógica unificada
     captureBtn.addEventListener('click', () => {
-        if (currentMode === 'photo') {
-            takePhoto();
-        } else {
+        if (currentMode === 'photo') takePhoto();
+        else {
             if (!isRecording) startRecording();
             else stopRecording();
         }
     });
 
+    // NOVO: Lógica de download programática
+    downloadBtn.addEventListener('click', triggerDownload);
+    
+    // NOVO: Lógica de compartilhamento
+    shareBtn.addEventListener('click', () => {
+        if (currentDownloadData.url || currentDownloadData.blob) {
+            shareFile(currentDownloadData.blob || currentDownloadData.url, currentDownloadData.filename, currentDownloadData.type);
+        }
+    });
+
+
+    // --- Download Programático ---
+    function triggerDownload() {
+        const { url, filename } = currentDownloadData;
+        
+        if (!url || !filename) {
+            alert("Erro: Arquivo de download não encontrado.");
+            return;
+        }
+
+        // 1. Cria um link temporário
+        const tempLink = document.createElement('a');
+        tempLink.style.display = 'none';
+        
+        // 2. Garante que o href e download estejam corretos
+        tempLink.href = url;
+        tempLink.download = filename;
+        
+        // 3. Adiciona ao corpo, clica e remove (garante o download do arquivo atual)
+        document.body.appendChild(tempLink);
+        tempLink.click();
+        document.body.removeChild(tempLink);
+    }
+    
+    // --- Funções Principais de Câmera e Captura ---
+    
     function setMode(mode) {
         currentMode = mode;
         document.getElementById('modePhoto').className = mode === 'photo' ? 'mode-btn active' : 'mode-btn';
@@ -217,7 +258,6 @@
       molduraPreview.src = currentMolduraUrl;
     }
 
-    // --- Câmera (Máxima Robustez: Restrições em Camadas e Áudio Corrigido) ---
     async function initCamera(tryAudio = true) {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
@@ -227,7 +267,6 @@
 
       const currentFacingMode = usingFrontCamera ? 'user' : 'environment';
       
-      // CAMADAS DE RESTRIÇÕES PARA MÁXIMA COMPATIBILIDADE (720p > 480p > Genérico)
       const constraintsList = [
         { video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } } },
         { video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } } },
@@ -235,23 +274,18 @@
       ];
 
       for (const videoConstraints of constraintsList) {
-        // CORREÇÃO: Cria uma cópia nova para garantir que `constraints.audio = true` não altere o array principal.
         let constraints = { ...videoConstraints }; 
-        
-        if (tryAudio) { 
-            constraints.audio = true; 
-        }
+        if (tryAudio) { constraints.audio = true; }
 
         try {
           stream = await navigator.mediaDevices.getUserMedia(constraints);
           handleStreamSuccess(stream);
-          return; // Sai da função se for bem-sucedido
+          return; 
         } catch (err) {
           console.warn(`Tentativa falhou com restrições:`, constraints, `Erro: ${err.name}`);
         }
       }
 
-      // Se todas as tentativas falharem
       if (tryAudio) {
            errorMsg.innerText = "Erro no áudio. Tentando iniciar sem microfone...";
            await initCamera(false); 
@@ -277,7 +311,6 @@
         };
     }
 
-    // FIX: Atraso de 1000ms para o erro NotReadableError (Android/Motorola)
     async function switchCamera() {
       if (isRecording) stopRecording(); 
       usingFrontCamera = !usingFrontCamera;
@@ -287,7 +320,6 @@
       await initCamera(true);
     }
     
-    // --- FOTO ---
     async function takePhoto() {
       flashEffect();
       canvasFinal.width = 1080; canvasFinal.height = 1920;
@@ -298,10 +330,12 @@
       canvasPreview.width = stage.clientWidth; canvasPreview.height = stage.clientHeight;
       ctxPrev.drawImage(canvasFinal, 0, 0, canvasPreview.width, canvasPreview.height);
 
-      showResult('image');
+      // Converte para Blob para obter os dados para download/share
+      canvasFinal.toBlob(blob => {
+          showResult('image', blob);
+      }, 'image/png');
     }
 
-    // --- VÍDEO (Com Codec Otimizado e Salvamento Corrigido) ---
     function startRecording() {
         isRecording = true;
         captureBtn.classList.add('recording');
@@ -331,7 +365,6 @@
             canvasStream.addTrack(stream.getAudioTracks()[0]);
         }
 
-        // Tenta formatos compatíveis em ordem decrescente (MP4 é a prioridade)
         const preferredMimeTypes = [
             'video/mp4;codecs=avc1.42001E', 
             'video/mp4',                   
@@ -388,7 +421,6 @@
     }
 
     function finishVideo() {
-      // Simplifica o MIME Type para o Blob
       const simpleMimeType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
       const blob = new Blob(recordedChunks, { type: simpleMimeType }); 
       
@@ -403,39 +435,39 @@
       video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
       resultUI.style.display = 'flex'; document.getElementById('postCaptureActions').style.display = 'flex';
       
-      const dBtn = document.getElementById('downloadBtn');
-      const timestamp = Date.now(); // Gera timestamp único
+      const timestamp = Date.now(); 
 
-      // REVOGA A URL ANTERIOR PARA EVITAR CACHE DE DOWNLOAD
+      // 1. REVOGA A URL ANTERIOR
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
           URL.revokeObjectURL(currentBlobUrl); 
       }
       currentBlobUrl = null;
+      currentDownloadData = { url: null, filename: null, type: null, blob: null }; // Limpa os dados de download
 
       if (type === 'image') {
           canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
-          const url = canvasFinal.toDataURL('image/png');
+          const url = URL.createObjectURL(blob);
+          const filename = `foto_${timestamp}.png`;
+          
           currentBlobUrl = url;
-          dBtn.href = url; 
-          dBtn.download = `foto_${timestamp}.png`; // Nome de arquivo único
-          sBtn.onclick = () => shareFile(url, `foto_${timestamp}.png`, 'image/png');
+          currentDownloadData = { url, filename, type: 'image/png', blob };
       } else {
           canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
           
           const ext = finalFileExtension || 'webm'; 
           const url = URL.createObjectURL(blob);
-          currentBlobUrl = url; // Armazena a nova URL
+          const filename = `video_${timestamp}.${ext}`;
           
-          dBtn.href = url; 
-          dBtn.download = `video_${timestamp}.${ext}`; // Nome de arquivo único
-          
-          sBtn.onclick = () => shareFile(blob, `video_${timestamp}.${ext}`, blob.type); 
+          currentBlobUrl = url; 
+          currentDownloadData = { url, filename, type: blob.type, blob };
       }
     }
 
 
     async function shareFile(data, name, type) {
         let file;
+        
+        // Se `data` for uma URL, converte para Blob/File. Se for um Blob, usa diretamente.
         if(typeof data === 'string') {
             const blob = await (await fetch(data)).blob();
             file = new File([blob], name, { type: type });
@@ -446,12 +478,14 @@
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
             navigator.share({ files: [file], title: 'Crispoparte' }).catch(e => {
                 console.error("Erro no compartilhamento nativo:", e);
+                
+                // CORREÇÃO CRÍTICA: Chama o download programático em caso de falha.
                 alert("Falha no compartilhamento nativo (limitação do aparelho/SO). Iniciando o download...");
-                document.getElementById('downloadBtn').click();
+                triggerDownload(); 
             });
         } else {
             alert("Compartilhamento não suportado. Iniciando o download...");
-            document.getElementById('downloadBtn').click();
+            triggerDownload(); 
         }
     }
 
@@ -461,6 +495,7 @@
           URL.revokeObjectURL(currentBlobUrl);
       }
       currentBlobUrl = null;
+      currentDownloadData = { url: null, filename: null, type: null, blob: null };
 
       canvasPreview.style.display = 'none'; videoPreview.style.display = 'none'; videoPreview.pause();
       video.style.display = 'block'; molduraPreview.style.display = 'block';
