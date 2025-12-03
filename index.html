@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V9 - Final Absoluto</title>
+  <title>Crispoparte V10 - FINAL</title>
   <style>
     :root {
       --accent: #25D366;
@@ -95,7 +95,6 @@
     .action-btn { 
         width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 16px; font-weight: bold; 
         cursor: pointer; text-align: center; text-decoration: none; display: inline-block; 
-        /* CRÍTICO: Removendo o HREF aqui para evitar cache inicial */
         }
     .btn-save { background: var(--accent); color: #fff; }
     .btn-new { background: #555; color: #fff; }
@@ -170,8 +169,10 @@
     let finalMimeType = null;
     let finalFileExtension = null;
     
-    // CRÍTICO: Variável para armazenar a URL ATIVA para revogação posterior
-    let currentBlobUrl = null; 
+    // VARIÁVEIS CRÍTICAS
+    let currentBlob = null;       // CRÍTICO: Armazena o Blob do arquivo atual
+    let currentBlobUrl = null;    // Armazena a URL para o preview/revogação
+    let currentFileName = null;   // Armazena o nome de arquivo único
 
     // --- DOM Elements ---
     const video = document.getElementById('camera');
@@ -208,7 +209,42 @@
         }
     });
 
-    // --- Câmera e Gravação (Mantidas) ---
+    // CRÍTICO: Listener de download (Ação Forçada)
+    downloadBtn.addEventListener('click', triggerDownload);
+    
+    // --- Download Programático (Última Esperança) ---
+    function triggerDownload(e) {
+        // Previne o comportamento padrão do link para garantir o JS assume o controle
+        e.preventDefault(); 
+        
+        const { currentBlob: blob, currentFileName: filename } = window;
+        
+        if (!blob || !filename) {
+            alert("Erro: Arquivo não encontrado para download. Tente uma nova gravação.");
+            return;
+        }
+
+        // 1. Cria a URL do objeto APENAS NO MOMENTO DO DOWNLOAD (Evita cache)
+        const url = URL.createObjectURL(blob);
+        
+        // 2. Cria um link temporário
+        const tempLink = document.createElement('a');
+        tempLink.style.display = 'none';
+        
+        // 3. Define o HREF e o download
+        tempLink.href = url;
+        tempLink.download = filename;
+        
+        // 4. Clica e remove (Garante que o download use o Blob atual)
+        document.body.appendChild(tempLink);
+        tempLink.click();
+        document.body.removeChild(tempLink);
+        
+        // 5. Revoga a URL imediatamente após o clique para liberar a memória
+        URL.revokeObjectURL(url); 
+    }
+    
+    // --- Funções Principais de Câmera e Captura ---
     
     function setMode(mode) {
         currentMode = mode;
@@ -394,7 +430,7 @@
       showResult('video', blob);
     }
 
-    // --- Lógica de Resultado e Download (CORRIGIDA) ---
+    // --- Lógica de Resultado e Download (CORREÇÃO DE ARMAZENAMENTO) ---
 
     function showResult(type, blob = null) {
       video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
@@ -408,22 +444,24 @@
       }
       currentBlobUrl = null;
 
-      const url = URL.createObjectURL(blob); // Cria a nova URL única
+      // 2. Armazena o Blob e o Nome de Arquivo (Download é ativado no listener)
+      currentBlob = blob;
 
       if (type === 'image') {
           canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
-          downloadBtn.download = `foto_${timestamp}.png`;
+          currentFileName = `foto_${timestamp}.png`;
       } else {
           canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
           const ext = finalFileExtension || 'webm'; 
-          downloadBtn.download = `video_${timestamp}.${ext}`;
+          currentFileName = `video_${timestamp}.${ext}`;
+          
+          // CRÍTICO: Armazena a URL do preview para revogação futura
+          currentBlobUrl = videoPreview.src; 
       }
       
-      // 2. CRÍTICO: Atribui a nova URL única ao HREF do botão A
-      downloadBtn.href = url;
-      
-      // 3. Armazena a nova URL para revogação futura (na próxima captura)
-      currentBlobUrl = url;
+      // CRÍTICO: Garante que o botão não tem href nem download para evitar cache
+      downloadBtn.removeAttribute('href');
+      downloadBtn.removeAttribute('download');
     }
 
 
@@ -433,9 +471,13 @@
           URL.revokeObjectURL(currentBlobUrl);
       }
       currentBlobUrl = null;
+      currentBlob = null;
+      currentFileName = null;
       
       // Limpa o link do botão de download
-      downloadBtn.href = '#';
+      downloadBtn.removeAttribute('href');
+      downloadBtn.removeAttribute('download');
+
 
       canvasPreview.style.display = 'none'; videoPreview.style.display = 'none'; videoPreview.pause();
       video.style.display = 'block'; molduraPreview.style.display = 'block';
