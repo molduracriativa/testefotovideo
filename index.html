@@ -1,452 +1,554 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Crispoparte — Restaurado (Foto/Vídeo + Moldura + Áudio)</title>
-<style>
-  :root{
-    --accent:#25D366;
-    --primary:#FF5722;
-    --bg:#000;
-    --card:#111;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#fff}
-  .container{max-width:420px;margin:0 auto;padding:12px;height:100%;display:flex;flex-direction:column;gap:10px}
-  .stage{position:relative;flex:1;min-height:520px;background:#000;border-radius:12px;overflow:hidden}
-  video, canvas, img.moldura {position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
-  img.moldura{pointer-events:none;z-index:5}
-  #canvasPreview{display:none;z-index:4}
-  #videoPreview{display:none;z-index:4}
-  .ui{position:relative;z-index:10;display:flex;flex-direction:column;gap:10px;margin-top:6px}
-  .topbar{display:flex;justify-content:space-between;align-items:center}
-  .controls{display:flex;justify-content:space-between;gap:8px}
-  .left, .right{display:flex;gap:8px;align-items:center}
-  button, a.btn{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);color:#fff;padding:10px 12px;border-radius:12px;cursor:pointer;font-weight:600}
-  button.primary{background:var(--accent);color:#000}
-  .mode-switch{display:flex;background:rgba(255,255,255,0.04);padding:4px;border-radius:20px}
-  .mode-switch button{background:transparent;padding:8px 14px;border-radius:14px;color:#ccc;border:none}
-  .mode-switch button.active{background:#fff;color:#000}
-  .frame-selector{display:flex;gap:8px}
-  .frame-selector button{min-width:44px}
-  .status{font-size:13px;color:#ccc}
-  #recordBtn{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px}
-  #recordBtn.recording{border-color:red;background:rgba(255,0,0,0.15)}
-  footer{font-size:12px;color:#999;text-align:center;margin-top:6px}
-  .hidden{display:none!important}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Crispoparte V13 - Final (Com Áudio)</title>
+  <style>
+    :root {
+      --accent: #25D366;
+      --primary: #FF5722;
+      --record: #ff0000;
+      --bg-overlay: rgba(0, 0, 0, 0.65);
+    }
+    
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    body { 
+      margin: 0; background: #000; color: #fff; overflow: hidden; 
+      width: 100vw; height: 100dvh; 
+      font-family: sans-serif;
+    }
+
+    .frame { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; }
+    .stage { position: relative; width: 100%; height: 100%; overflow: hidden; background: #111; }
+
+    video, #molduraPreview, #canvasPreview, #videoPreview { 
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; 
+    }
+
+    video { transform: scaleX(1); transition: transform 0.3s; }
+    video.mirrored { transform: scaleX(-1); }
+
+    #molduraPreview { pointer-events: none; z-index: 5; }
+    #canvasPreview, #videoPreview { display: none; z-index: 6; background: #000; }
+
+    /* UI Layers */
+    .ui-layer {
+      position: absolute; inset: 0; pointer-events: none; z-index: 20;
+      display: flex; flex-direction: column; justify-content: space-between; padding: 20px;
+    }
+
+    .top-bar { display: flex; justify-content: space-between; align-items: flex-start; pointer-events: auto; }
+
+    .timer-badge {
+        background: red; color: white; padding: 5px 12px; border-radius: 12px;
+        font-weight: bold; font-size: 16px; display: none; animation: pulse 1s infinite;
+    }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+
+    .controls-bottom {
+      display: flex; flex-direction: column; align-items: center; gap: 15px; pointer-events: auto; padding-bottom: 20px;
+    }
+
+    .mode-switch {
+        display: flex; background: rgba(0,0,0,0.5); border-radius: 20px; padding: 4px; backdrop-filter: blur(4px);
+    }
+    .mode-btn {
+        padding: 8px 20px; border-radius: 16px; border: none; background: transparent; color: #ccc; font-weight: 600; cursor: pointer;
+    }
+    .mode-btn.active { background: #fff; color: #000; }
+
+    .btn { 
+      padding: 10px 16px; font-size: 14px; font-weight: 600;
+      border: 2px solid rgba(255,255,255,0.3); border-radius: 20px; 
+      background: var(--bg-overlay); color: #fff; cursor: pointer; backdrop-filter: blur(4px);
+    }
+    .btn.active { border-color: var(--accent); background: rgba(37, 211, 102, 0.2); color: var(--accent); }
+    .frame-selector { display: flex; gap: 10px; }
+
+    /* Botão de Captura */
+    #captureBtn { 
+      width: 80px; height: 80px; border-radius: 50%; border: 4px solid #fff; 
+      background: rgba(255,255,255,0.2); cursor: pointer; display: flex; 
+      align-items: center; justify-content: center; transition: all 0.2s;
+    }
+    #captureBtn:active { transform: scale(0.95); }
+    #captureBtn svg { width: 36px; height: 36px; fill: #fff; }
+
+    /* Estado Gravando */
+    #captureBtn.recording { border-color: var(--record); background: rgba(255, 0, 0, 0.5); }
+    #captureBtn.recording svg { fill: var(--record); }
+    #captureBtn .stop-icon { display: none; width: 30px; height: 30px; background: var(--record); border-radius: 4px; }
+    #captureBtn.recording .stop-icon { display: block; }
+    #captureBtn.recording .cam-icon { display: none; }
+
+    #startScreen { 
+      position: absolute; inset: 0; background: #000; z-index: 50; 
+      display: flex; flex-direction: column; align-items: center; justify-content: center; 
+      gap: 20px; text-align: center;
+    }
+    #startBtn { padding: 18px 32px; font-size: 20px; background: var(--primary); color: white; border: none; border-radius: 50px; cursor: pointer; }
+
+    #postCaptureActions { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; pointer-events: auto; }
+    
+    .action-btn { 
+        width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 16px; font-weight: bold; 
+        cursor: pointer; text-align: center; text-decoration: none; display: inline-block; 
+        }
+    .btn-save { background: var(--accent); color: #fff; }
+    .btn-new { background: #555; color: #fff; }
+    .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 10; transition: opacity 0.1s; }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <h3 style="margin:0 0 6px 0">Câmera Crispoparte</h3>
 
+  <div class="frame">
     <div class="stage" id="stage">
-      <!-- live camera (muted so it can autoplay) -->
       <video id="camera" autoplay playsinline muted></video>
+      <canvas id="canvasPreview"></canvas> 
+      <video id="videoPreview" playsinline controls></video>
+      <img id="molduraPreview" alt="" src="" />
+      <div class="flash" id="flash"></div>
 
-      <!-- preview canvas (for captured photo preview if needed) -->
-      <canvas id="canvasPreview"></canvas>
-
-      <!-- video preview for recorded files -->
-      <video id="videoPreview" controls playsinline></video>
-
-      <!-- visible moldura overlay -->
-      <img id="molduraPreview" class="moldura" src="moldura1.png" alt="moldura" />
-
-      <!-- flash effect -->
-      <div id="flash" style="position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .12s;z-index:6"></div>
-    </div>
-
-    <div class="ui">
-      <div class="topbar">
-        <div class="left">
-          <button id="switchBtn" title="Trocar câmera">🔄 Trocar</button>
-          <div id="status" class="status">Aguardando</div>
+      <div class="ui-layer" id="cameraUI" style="display: none;">
+        <div class="top-bar">
+          <button class="btn" id="switchBtn">🔄 Trocar</button>
+          <div id="recordingTimer" class="timer-badge">00:00</div>
         </div>
 
-        <div class="right">
-          <div id="recordingTimer" class="status" style="display:none;background:rgba(0,0,0,0.4);padding:6px 10px;border-radius:12px">00:00</div>
-        </div>
-      </div>
-
-      <div class="controls">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div class="mode-switch" role="tablist">
-            <button id="modePhoto" class="active">FOTO</button>
-            <button id="modeVideo">VÍDEO</button>
+        <div class="controls-bottom">
+          <div class="mode-switch">
+             <button class="mode-btn active" id="modePhoto">FOTO</button>
+             <button class="mode-btn" id="modeVideo">VÍDEO</button>
           </div>
 
-          <div class="frame-selector" aria-label="Molduras">
-            <button id="m1Btn" class="active">1</button>
-            <button id="m2Btn">2</button>
+          <div class="frame-selector">
+            <button class="btn active" id="m1Btn">1</button>
+            <button class="btn" id="m2Btn">2</button>
           </div>
-        </div>
 
-        <div style="display:flex;align-items:center;gap:8px">
-          <button id="captureBtn" title="Capturar (Foto ou Vídeo)">
-            <svg class="cam-icon" viewBox="0 0 24 24" width="28" height="28" fill="white"><path d="M12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/><path d="M20 5h-3.17L15 3H9L7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 14H4V7h16v12z"/></svg>
+          <button id="captureBtn">
+            <svg class="cam-icon" viewBox="0 0 24 24"><path d="M12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/><path d="M20 5h-3.17L15 3H9L7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 14H4V7h16v12z"/></svg>
+            <div class="stop-icon"></div>
           </button>
         </div>
       </div>
 
-      <div class="controls">
-        <a id="downloadBtn" class="btn" href="#" download="#" style="text-decoration:none">📥 Baixar / Salvar</a>
-        <button id="shareManualBtn" class="btn">📱 Compartilhar</button>
+      <div class="ui-layer" id="resultUI" style="display: none; justify-content: flex-end; align-items: center;">
+        <div id="postCaptureActions">
+          <a id="downloadBtn" class="action-btn btn-save">📥 Baixar / Salvar</a>
+          <button id="shareManualBtn" class="action-btn btn-new">📱 Compartilhar no WhatsApp</button>
+        </div>
       </div>
     </div>
-
-    <footer>Permita câmera e microfone ao iniciar</footer>
   </div>
 
-<script>
-/* === Config e Estado === */
-const MOLDURAS = { m1: 'moldura1.png', m2: 'moldura2.png' };
-let currentMolduraUrl = MOLDURAS.m1;
-let currentMolduraImg = new Image(); currentMolduraImg.crossOrigin = "anonymous"; currentMolduraImg.src = currentMolduraUrl;
+  <div id="startScreen">
+    <h2 style="margin-bottom:0">Câmera Crispoparte</h2>
+    <p style="color:#aaa; margin-top:5px">Permita câmera e microfone</p>
+    <button id="startBtn">INICIAR</button>
+    <p id="errorMsg" style="color:red; font-size:12px; margin-top: 10px;"></p>
+  </div>
 
-let usingFrontCamera = true;
-let stream = null;
-let currentMode = 'photo'; // 'photo' | 'video'
-let isRecording = false;
-let mediaRecorder = null;
-let recordedChunks = [];
-let recordingStartTime = 0;
-let animationFrameId = null;
-let canvasFinal = document.createElement('canvas'); // not in DOM
-const canvasPreview = document.getElementById('canvasPreview');
-const ctxPreview = canvasPreview.getContext('2d');
-const videoEl = document.getElementById('camera');
-const videoPreview = document.getElementById('videoPreview');
+  <canvas id="canvasFinal" style="display: none;"></canvas>
 
-let currentBlob = null;
-let currentBlobUrl = null;
-let currentFileName = null;
-let finalMimeType = null;
-let finalFileExtension = null;
+  <script>
+    // --- Config ---
+    const MOLDURAS = { 'm1': 'moldura1.png', 'm2': 'moldura2.png' };
+    let currentMolduraUrl = MOLDURAS['m1'];
+    let usingFrontCamera = true;
+    let stream = null;
+    let currentMode = 'photo'; 
+    let isRecording = false;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recordingStartTime = 0;
+    let animationFrameId = null;
+    
+    let finalMimeType = null;
+    let finalFileExtension = null;
+    
+    // VARIÁVEIS CRÍTICAS
+    let currentBlob = null;       // Armazena o Blob do arquivo atual
+    let currentBlobUrl = null;    // Armazena a URL para o preview/revogação
+    let currentFileName = null;   // Armazena o nome de arquivo único
+    let currentFileType = null;   // Armazena o tipo ('image' ou 'video')
 
-/* DOM */
-const startStatus = document.getElementById('status');
-const recordingTimer = document.getElementById('recordingTimer');
-const molduraPreview = document.getElementById('molduraPreview');
-const captureBtn = document.getElementById('captureBtn');
-const downloadBtn = document.getElementById('downloadBtn');
-const shareManualBtn = document.getElementById('shareManualBtn');
+    // --- DOM Elements ---
+    const video = document.getElementById('camera');
+    const stage = document.getElementById('stage');
+    const canvasPreview = document.getElementById('canvasPreview');
+    const videoPreview = document.getElementById('videoPreview');
+    const molduraPreview = document.getElementById('molduraPreview');
+    const canvasFinal = document.getElementById('canvasFinal');
+    const ctxFinal = canvasFinal.getContext('2d', { alpha: false });
+    
+    const startScreen = document.getElementById('startScreen');
+    const cameraUI = document.getElementById('cameraUI');
+    const resultUI = document.getElementById('resultUI');
+    const captureBtn = document.getElementById('captureBtn');
+    const recordingTimer = document.getElementById('recordingTimer');
+    const errorMsg = document.getElementById('errorMsg');
+    const downloadBtn = document.getElementById('downloadBtn');
+    
+    const shareManualBtn = document.getElementById('shareManualBtn');
 
-/* Buttons */
-document.getElementById('switchBtn').addEventListener('click', switchCamera);
-document.getElementById('m1Btn').addEventListener('click', ()=>setMoldura('m1'));
-document.getElementById('m2Btn').addEventListener('click', ()=>setMoldura('m2'));
-document.getElementById('modePhoto').addEventListener('click', ()=>setMode('photo'));
-document.getElementById('modeVideo').addEventListener('click', ()=>setMode('video'));
-captureBtn.addEventListener('click', () => {
-  if(currentMode === 'photo') takePhoto(); else isRecording ? stopRecording() : startRecording();
-});
-downloadBtn.addEventListener('click', (e) => {
-  if(!currentBlobUrl || currentBlobUrl === '#') { e.preventDefault(); alert('Arquivo não pronto.'); }
-});
-shareManualBtn.addEventListener('click', showShareInstructions);
 
-/* Inicializa (não chamo .init imediatamente para evitar autoplay/permissão sem clique) */
-setMoldura('m1');
-setStatus('Aguardando. Clique em "Trocar" ou permita câmera no navegador.');
-
-/* Funções UI */
-function setStatus(s){ startStatus.innerText = s; console.log('[status]',s); }
-function setMode(mode){
-  currentMode = mode;
-  document.getElementById('modePhoto').classList.toggle('active', mode==='photo');
-  document.getElementById('modeVideo').classList.toggle('active', mode==='video');
-  captureBtn.style.borderColor = mode === 'video' ? 'red' : 'white';
-}
-function setMoldura(key){
-  document.querySelectorAll('.frame-selector button').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById(key==='m1'?'m1Btn':'m2Btn');
-  if(btn) btn.classList.add('active');
-  currentMolduraUrl = MOLDURAS[key];
-  molduraPreview.src = currentMolduraUrl;
-  currentMolduraImg = new Image();
-  currentMolduraImg.crossOrigin = "anonymous";
-  currentMolduraImg.src = currentMolduraUrl;
-}
-
-/* --- Camera init (invocado ao primeiro uso) --- */
-async function initCamera(tryAudio=true){
-  if(stream){
-    try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){}
-    stream = null;
-  }
-  setStatus('Solicitando permissões...');
-  const facing = usingFrontCamera ? 'user' : 'environment';
-  const constraints = { video: { facingMode: facing }, audio: tryAudio };
-  try{
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-  }catch(err){
-    console.warn('getUserMedia error', err);
-    if(tryAudio){ setStatus('Permissões negadas ou erro de áudio. Tentando sem microfone...'); return initCamera(false); }
-    setStatus('Falha ao acessar câmera'); alert('Erro ao acessar câmera/microfone: ' + (err && err.message ? err.message : err));
-    return;
-  }
-
-  videoEl.srcObject = stream;
-  if(usingFrontCamera) videoEl.classList.add('mirrored'); else videoEl.classList.remove('mirrored');
-  videoEl.onloadedmetadata = ()=>{ videoEl.play().catch(()=>{}); setStatus('Pronto'); prepareCanvasForCapture(); showUI(); };
-}
-
-/* Exibe UI (garantir que botões fiquem visíveis) */
-function showUI(){
-  document.getElementById('camera').style.display = 'block';
-  document.querySelector('.ui').style.display = 'flex';
-}
-
-/* Prepara canvasFinal para 1080x1920 */
-function prepareCanvasForCapture(){
-  canvasFinal.width = 1080;
-  canvasFinal.height = 1920;
-  canvasPreview.width = document.getElementById('stage').clientWidth || 360;
-  canvasPreview.height = document.getElementById('stage').clientHeight || 640;
-}
-
-/* Trocar câmera */
-async function switchCamera(){
-  usingFrontCamera = !usingFrontCamera;
-  setStatus('Trocando câmera...');
-  await new Promise(r=>setTimeout(r, 300));
-  await initCamera(true);
-}
-
-/* Desenhar frame do vídeo no canvas final (usado p/ foto e p/ frame do vídeo) */
-function drawVideoToCanvas(ctx, w, h){
-  const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
-  if(!vw || !vh) return;
-  const vidRatio = vw / vh, canvasRatio = w / h;
-  let dw, dh, dx, dy;
-  if(vidRatio > canvasRatio){ dh = h; dw = h * vidRatio; dx = (w - dw)/2; dy = 0; }
-  else { dw = w; dh = w / vidRatio; dx = 0; dy = (h - dh)/2; }
-
-  if(usingFrontCamera){
-    ctx.save();
-    ctx.scale(-1,1);
-    ctx.drawImage(videoEl, -dx - dw, dy, dw, dh);
-    ctx.restore();
-  } else {
-    ctx.drawImage(videoEl, dx, dy, dw, dh);
-  }
-}
-
-/* ----- Foto ----- */
-function takePhoto(){
-  // ensure camera started
-  if(!stream) { initCamera(true); return; }
-
-  flashEffect();
-  canvasFinal.width = 1080; canvasFinal.height = 1920;
-  const ctx = canvasFinal.getContext('2d');
-  drawVideoToCanvas(ctx, 1080, 1920);
-  // draw moldura
-  if(currentMolduraImg && currentMolduraImg.complete) ctx.drawImage(currentMolduraImg, 0, 0, 1080, 1920);
-
-  // preview small canvas for UI
-  canvasPreview.width = document.getElementById('stage').clientWidth;
-  canvasPreview.height = document.getElementById('stage').clientHeight;
-  ctxPreview.clearRect(0,0,canvasPreview.width,canvasPreview.height);
-  ctxPreview.drawImage(canvasFinal, 0, 0, canvasPreview.width, canvasPreview.height);
-  canvasPreview.style.display = 'block';
-  videoPreview.style.display = 'none';
-
-  // blob and download
-  canvasFinal.toBlob(blob => {
-    showResult('image', blob);
-  }, 'image/png');
-}
-
-/* ----- Vídeo: record com áudio + canvas (moldura desenhada) ----- */
-function startRecording(){
-  if(!stream) { initCamera(true); return; }
-
-  isRecording = true;
-  captureBtn.classList.add('recording');
-  recordingTimer.style.display = 'block';
-  recordingStartTime = Date.now();
-  recordedChunks = [];
-  finalMimeType = null; finalFileExtension = null;
-
-  // ensure canvas size unified
-  canvasFinal.width = 1080; canvasFinal.height = 1920;
-  const ctx = canvasFinal.getContext('2d');
-
-  // draw loop
-  const loop = () => {
-    if(!isRecording) return;
-    drawVideoToCanvas(ctx, 1080, 1920);
-    if(currentMolduraImg && currentMolduraImg.complete) ctx.drawImage(currentMolduraImg, 0,0,1080,1920);
-    updateTimer();
-    animationFrameId = requestAnimationFrame(loop);
-  };
-  loop();
-
-  // capture canvas stream
-  const canvasStream = canvasFinal.captureStream(30);
-
-  // attach audio tracks
-  const audioTracks = stream ? stream.getAudioTracks() : [];
-  if(audioTracks && audioTracks.length){
-    audioTracks.forEach(track => {
-      try { canvasStream.addTrack(track.clone ? track.clone() : track); } catch(e){
-        try{ canvasStream.addTrack(track); }catch(_){ console.warn('unable to add audio track',_); }
-      }
+    // --- Events ---
+    setMoldura(document.getElementById('m1Btn'), 'm1');
+    document.getElementById('startBtn').addEventListener('click', () => initCamera(true)); 
+    document.getElementById('switchBtn').addEventListener('click', switchCamera);
+    document.getElementById('m1Btn').addEventListener('click', (e) => setMoldura(e.target, 'm1'));
+    document.getElementById('m2Btn').addEventListener('click', (e) => setMoldura(e.target, 'm2'));
+    document.getElementById('modePhoto').addEventListener('click', () => setMode('photo'));
+    document.getElementById('modeVideo').addEventListener('click', () => setMode('video'));
+    
+    captureBtn.addEventListener('click', () => {
+        if (currentMode === 'photo') takePhoto();
+        else {
+            if (!isRecording) startRecording();
+            else stopRecording();
+        }
     });
-  }
 
-  // pick mime
-  const preferred = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm'
-  ];
-  let chosen = '';
-  for(const m of preferred){ try{ if(m && MediaRecorder.isTypeSupported(m)){ chosen = m; break; } }catch(e){} }
-  finalMimeType = chosen || 'video/webm';
-  finalFileExtension = finalMimeType.includes('mp4') ? 'mp4' : 'webm';
+    // Listener para o botão de compartilhamento manual
+    shareManualBtn.addEventListener('click', showShareInstructions);
+    
+    // Listener de Download (Apenas para garantir que o link só funcione quando tiver conteúdo)
+    downloadBtn.addEventListener('click', (e) => {
+        if (!downloadBtn.href || downloadBtn.href.includes('#')) {
+            e.preventDefault();
+            alert("Aguarde a finalização do processamento antes de clicar.");
+        }
+    });
 
-  try {
-    mediaRecorder = finalMimeType ? new MediaRecorder(canvasStream, { mimeType: finalMimeType }) : new MediaRecorder(canvasStream);
-  } catch(e){
-    alert('Não foi possível iniciar gravador: ' + e.message);
-    isRecording = false;
-    captureBtn.classList.remove('recording');
-    recordingTimer.style.display = 'none';
-    return;
-  }
 
-  mediaRecorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
-  mediaRecorder.onstop = finishVideo;
-  mediaRecorder.start();
-  setStatus('Gravando...');
-}
+    // --- Instrução de Compartilhamento Manual ---
+    function showShareInstructions() {
+        if (!currentFileName) {
+            alert("Nenhum arquivo capturado para compartilhar.");
+            return;
+        }
 
-/* Stop recording */
-function stopRecording(){
-  if(!isRecording) return;
-  isRecording = false;
-  captureBtn.classList.remove('recording');
-  recordingTimer.style.display = 'none';
-  recordingTimer.innerText = '00:00';
-  if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-  if(animationFrameId) cancelAnimationFrame(animationFrameId);
-}
+        const typeText = currentFileType === 'image' ? 'A Foto' : 'O Vídeo';
 
-/* finish video */
-function finishVideo(){
-  const simpleMime = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
-  const blob = new Blob(recordedChunks, { type: simpleMime });
-  if(!blob || blob.size < 1000){ alert('Erro: arquivo inválido. Tente novamente.'); resetCamera(); return; }
-  const url = URL.createObjectURL(blob);
-  videoPreview.src = url; videoPreview.style.display = 'block';
-  canvasPreview.style.display = 'none';
-  showResult('video', blob, url);
-}
+        const instructions = `
+        Atenção: Este vídeo contém áudio e PODE ser rejeitado pelas redes sociais.
+        
+        ✅ ${typeText} foi SALVO como "${currentFileName}" na sua galeria (pasta "Download" ou "Filmes").
 
-/* show result + download logic */
-function showResult(type, blob, externalUrl){
-  // hide live
-  videoEl.style.display = 'none';
-  molduraPreview.style.display = 'none';
-  setStatus('Processado');
-  document.querySelector('.ui').style.display = 'flex';
-  document.getElementById('postCaptureActions')?.style?.display = 'flex';
+        ---
+        
+        Siga estes passos:
+        
+        1. Saia desta tela.
+        2. Abra o WhatsApp/Instagram.
+        3. No aplicativo, escolha a opção Anexar/Compartilhar.
+        4. Encontre o arquivo "${currentFileName}" na sua Galeria.
+        
+        Se falhar, o único modo é usar a versão sem áudio.
+        `;
 
-  const timestamp = Date.now();
+        alert(instructions);
+        
+        resetCamera();
+    }
 
-  // revoke previous only on reset
-  // store
-  currentBlob = blob;
-  currentFileName = type === 'image' ? `foto_${timestamp}.png` : `video_${timestamp}.${finalFileExtension || 'webm'}`;
-  currentBlobUrl = externalUrl || URL.createObjectURL(blob);
 
-  // try automatic download (some Android block this)
-  try {
-    const tempLink = document.createElement('a');
-    tempLink.style.display = 'none';
-    tempLink.href = currentBlobUrl;
-    tempLink.download = currentFileName;
-    document.body.appendChild(tempLink);
-    tempLink.click();
-    document.body.removeChild(tempLink);
-  } catch(e){
-    console.warn('auto-download failed', e);
-  }
+    // --- Funções Principais de Câmera e Captura ---
+    
+    function setMode(mode) {
+        currentMode = mode;
+        document.getElementById('modePhoto').className = mode === 'photo' ? 'mode-btn active' : 'mode-btn';
+        document.getElementById('modeVideo').className = mode === 'video' ? 'mode-btn active' : 'mode-btn';
+        captureBtn.style.borderColor = mode === 'video' ? '#ff0000' : '#fff';
+    }
 
-  // setup manual download button (always available)
-  downloadBtn.href = currentBlobUrl;
-  downloadBtn.download = currentFileName;
-  downloadBtn.innerText = '📥 Baixar / Salvar';
+    function setMoldura(btn, key) {
+      document.querySelectorAll('.frame-selector .btn').forEach(b => b.classList.remove('active'));
+      if(btn) btn.classList.add('active');
+      currentMolduraUrl = MOLDURAS[key];
+      molduraPreview.src = currentMolduraUrl;
+    }
 
-  // show preview in videoPreview if video
-  if(type === 'image'){
-    canvasPreview.style.display = 'block';
-    videoPreview.style.display = 'none';
-  } else {
-    videoPreview.style.display = 'block';
-    canvasPreview.style.display = 'none';
-  }
-}
+    async function initCamera(tryAudio = true) {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null; 
+      }
+      errorMsg.innerText = "Solicitando permissões...";
 
-/* reset camera/UI */
-function resetCamera(){
-  try{ if(currentBlobUrl && currentBlobUrl.startsWith('blob:')) URL.revokeObjectURL(currentBlobUrl); }catch(e){}
-  currentBlobUrl = null;
-  currentBlob = null;
-  currentFileName = null;
-  downloadBtn.href = '#';
-  downloadBtn.download = '';
-  downloadBtn.innerText = '📥 Baixar / Salvar';
-  videoPreview.pause(); videoPreview.src = '';
-  videoEl.style.display = 'block';
-  molduraPreview.style.display = 'block';
-  canvasPreview.style.display = 'none';
-  setStatus('Pronto');
-}
+      const currentFacingMode = usingFrontCamera ? 'user' : 'environment';
+      
+      const constraintsList = [
+        { video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } } },
+        { video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } } },
+        { video: { facingMode: currentFacingMode } }
+      ];
 
-/* share instructions (manual) */
-function showShareInstructions(){
-  if(!currentFileName){ alert('Nenhum arquivo pronto para compartilhar.'); return; }
-  alert(`Arquivo salvo como "${currentFileName}". Abra seu app de redes sociais e anexe o arquivo da pasta Downloads/Arquivos.`);
-  resetCamera();
-}
+      for (const videoConstraints of constraintsList) {
+        let constraints = { ...videoConstraints }; 
+        if (tryAudio) { constraints.audio = true; }
 
-/* flash effect */
-function flashEffect(){ const f = document.getElementById('flash'); f.style.opacity = '1'; setTimeout(()=>f.style.opacity = '0',160); }
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          handleStreamSuccess(stream);
+          return; 
+        } catch (err) {
+          console.warn(`Tentativa falhou com restrições:`, constraints, `Erro: ${err.name}`);
+        }
+      }
 
-/* update timer */
-function updateTimer(){
-  const diff = Math.floor((Date.now() - recordingStartTime)/1000);
-  const m = String(Math.floor(diff/60)).padStart(2,'0');
-  const s = String(diff%60).padStart(2,'0');
-  recordingTimer.innerText = `${m}:${s}`;
-}
+      if (tryAudio) {
+           errorMsg.innerText = "Erro no áudio. Tentando iniciar sem microfone...";
+           await initCamera(false); 
+      } else {
+           const errMsg = `FALHA CRÍTICA! A câmera e o áudio não puderam ser inicializados.`;
+           errorMsg.innerText = errMsg;
+           alert(errMsg); 
+      }
+    }
 
-/* reset on fatal error */
-function resetCameraAndUI(){
-  try{ if(stream) stream.getTracks().forEach(t=>t.stop()); }catch(e){}
-  stream = null;
-  videoEl.srcObject = null;
-  setStatus('Aguardando permissão');
-}
+    function handleStreamSuccess(newStream) {
+        stream = newStream;
+        video.srcObject = stream;
+        
+        if (usingFrontCamera) video.classList.add('mirrored');
+        else video.classList.remove('mirrored');
 
-/* If user interacts (first click), ensure camera is started */
-document.addEventListener('click', function onFirstClick(){
-  // Start camera lazily on first user interaction to satisfy autoplay/permission policies
-  if(!stream){
-    initCamera(true);
-  }
-  document.removeEventListener('click', onFirstClick);
-});
+        video.onloadedmetadata = () => {
+          video.play();
+          startScreen.style.display = 'none';
+          cameraUI.style.display = 'flex';
+          errorMsg.innerText = "";
+        };
+    }
 
-/* initial hide of preview elements */
-canvasPreview.style.display = 'none';
-videoPreview.style.display = 'none';
-recordingTimer.style.display = 'none';
-</script>
+    async function switchCamera() {
+      if (isRecording) stopRecording(); 
+      usingFrontCamera = !usingFrontCamera;
+      
+      await new Promise(resolve => setTimeout(resolve, 1000)); 
+      
+      await initCamera(true);
+    }
+    
+    async function takePhoto() {
+      flashEffect();
+      canvasFinal.width = 1080; canvasFinal.height = 1920;
+      drawVideoToCanvas(ctxFinal, 1080, 1920);
+      await drawImageLayer(ctxFinal, currentMolduraUrl, 1080, 1920);
+      
+      const ctxPrev = canvasPreview.getContext('2d');
+      canvasPreview.width = stage.clientWidth; canvasPreview.height = stage.clientHeight;
+      ctxPrev.drawImage(canvasFinal, 0, 0, canvasPreview.width, canvasPreview.height);
+
+      canvasFinal.toBlob(blob => {
+          showResult('image', blob);
+      }, 'image/png');
+    }
+
+    function startRecording() {
+        isRecording = true;
+        captureBtn.classList.add('recording');
+        recordingTimer.style.display = 'block';
+        recordingStartTime = Date.now();
+        recordedChunks = [];
+        finalMimeType = null;
+        finalFileExtension = null;
+        
+        canvasFinal.width = 720; canvasFinal.height = 1280;
+
+        const loop = () => {
+            if (!isRecording) return;
+            drawVideoToCanvas(ctxFinal, 720, 1280); 
+            
+            const img = new Image(); img.src = currentMolduraUrl;
+            if(img.complete) ctxFinal.drawImage(img, 0, 0, 720, 1280);
+            
+            updateTimer();
+            animationFrameId = requestAnimationFrame(loop);
+        };
+        loop();
+
+        // CAPTURA DO CANVAS
+        const canvasStream = canvasFinal.captureStream(30);
+        
+        // CRÍTICO: ADICIONA A FAIXA DE ÁUDIO DE VOLTA
+        if (stream && stream.getAudioTracks().length > 0) {
+            canvasStream.addTrack(stream.getAudioTracks()[0]);
+        }
+
+        const preferredMimeTypes = [
+            'video/mp4;codecs=avc1.42001E', 
+            'video/mp4',                   
+            'video/webm;codecs=vp9',       
+            'video/webm;codecs=vp8',       
+            'video/webm'                   
+        ];
+        
+        let options = {};
+        let selectedMimeType = null;
+
+        for (const mimeType of preferredMimeTypes) {
+            if (MediaRecorder.isTypeSupported(mimeType)) {
+                selectedMimeType = mimeType;
+                options = { mimeType: mimeType };
+                break;
+            }
+        }
+
+        if (!selectedMimeType) {
+            alert("ERRO DE VÍDEO: O dispositivo não suporta nenhum formato de gravação de vídeo conhecido.");
+            isRecording = false;
+            captureBtn.classList.remove('recording');
+            recordingTimer.style.display = 'none';
+            return; 
+        }
+        
+        finalMimeType = selectedMimeType;
+        finalFileExtension = selectedMimeType.includes('mp4') ? 'mp4' : 'webm';
+
+
+        try {
+            mediaRecorder = new MediaRecorder(canvasStream, options);
+        } catch(e) {
+            alert("ERRO CRÍTICO NA GRAVAÇÃO: Não foi possível iniciar o MediaRecorder. Motivo: " + e.message);
+            isRecording = false;
+            captureBtn.classList.remove('recording');
+            recordingTimer.style.display = 'none';
+            return;
+        }
+
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = finishVideo;
+        mediaRecorder.start();
+    }
+
+    function stopRecording() {
+      isRecording = false;
+      captureBtn.classList.remove('recording');
+      cancelAnimationFrame(animationFrameId);
+      if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      recordingTimer.style.display = 'none';
+      recordingTimer.innerText = "00:00";
+    }
+
+    function finishVideo() {
+      const simpleMimeType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
+      const blob = new Blob(recordedChunks, { type: simpleMimeType }); 
+      
+      const videoURL = URL.createObjectURL(blob);
+      videoPreview.src = videoURL;
+      showResult('video', blob);
+    }
+
+    // --- Lógica de Resultado e Download ---
+
+    function showResult(type, blob = null) {
+      video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
+      resultUI.style.display = 'flex'; document.getElementById('postCaptureActions').style.display = 'flex';
+      
+      const timestamp = Date.now(); 
+
+      // 1. REVOGA A URL ANTERIORMENTE ATIVA para liberar a memória e cache
+      if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(currentBlobUrl); 
+      }
+      currentBlobUrl = null;
+
+      // 2. Armazena o Blob, Tipo e Nome de Arquivo
+      currentBlob = blob;
+      currentFileType = type;
+
+      if (type === 'image') {
+          canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
+          currentFileName = `foto_${timestamp}.png`;
+      } else {
+          canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
+          const ext = finalFileExtension || 'webm'; 
+          currentFileName = `video_${timestamp}.${ext}`;
+          currentBlobUrl = videoPreview.src; // URL de preview
+      }
+      
+      // 3. CRÍTICO: Executa o download imediatamente após a criação do blob (Salva na Galeria)
+      const tempUrl = URL.createObjectURL(blob);
+      const tempLink = document.createElement('a');
+      tempLink.style.display = 'none';
+      tempLink.href = tempUrl;
+      tempLink.download = currentFileName;
+      
+      document.body.appendChild(tempLink);
+      tempLink.click();
+      document.body.removeChild(tempLink);
+      URL.revokeObjectURL(tempUrl); 
+      
+      // 4. Atualiza o botão DownloadBtn
+      downloadBtn.href = currentBlobUrl || '#'; 
+      downloadBtn.download = currentFileName; 
+      downloadBtn.innerText = `✅ Salvo! Clique para Visualizar`;
+    }
+
+
+    function resetCamera() {
+      if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(currentBlobUrl);
+      }
+      currentBlobUrl = null;
+      currentBlob = null;
+      currentFileName = null;
+      
+      downloadBtn.href = '#';
+      downloadBtn.download = '';
+      downloadBtn.innerText = `📥 Baixar / Salvar`;
+
+
+      canvasPreview.style.display = 'none'; videoPreview.style.display = 'none'; videoPreview.pause();
+      video.style.display = 'block'; molduraPreview.style.display = 'block';
+      resultUI.style.display = 'none'; cameraUI.style.display = 'flex';
+      errorMsg.innerText = "";
+    }
+    
+    // --- Funções Auxiliares (Desenho e Timer) ---
+
+    function updateTimer() {
+        const diff = Math.floor((Date.now() - recordingStartTime) / 1000);
+        const m = Math.floor(diff / 60).toString().padStart(2,'0');
+        const s = (diff % 60).toString().padStart(2,'0');
+        recordingTimer.innerText = `${m}:${s}`;
+    }
+
+    function drawVideoToCanvas(ctx, w, h) {
+      const vw = video.videoWidth; const vh = video.videoHeight;
+      if(!vw || !vh) return;
+      const vidRatio = vw / vh; const canvasRatio = w / h;
+      let dw, dh, dx, dy;
+      if (vidRatio > canvasRatio) { dh = h; dw = h * vidRatio; dx = (w - dw) / 2; dy = 0; } 
+      else { dw = w; dh = w / vidRatio; dx = 0; dy = (h - dh) / 2; }
+      
+      if (usingFrontCamera) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -dx - dw, dy, dw, dh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, dx, dy, dw, dh);
+      }
+    }
+
+    function drawImageLayer(ctx, url, w, h) {
+      return new Promise(r => {
+        const img = new Image(); img.crossOrigin = "anonymous";
+        img.onload = () => { ctx.drawImage(img, 0, 0, w, h); r(); };
+        img.onerror = r; img.src = url;
+      });
+    }
+
+    function flashEffect() {
+        const f = document.getElementById('flash');
+        f.style.opacity = '1'; setTimeout(() => f.style.opacity = '0', 150);
+    }
+  </script>
 </body>
 </html>
