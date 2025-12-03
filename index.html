@@ -217,6 +217,8 @@
     async function initCamera(tryAudio = true) {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
+        // Força a liberação da variável stream para liberar o hardware
+        stream = null; 
       }
       errorMsg.innerText = "Solicitando permissões...";
 
@@ -255,7 +257,7 @@
         };
     }
 
-    // *** FIX: Atraso de 300ms para o erro NotReadableError ***
+    // *** FIX FINAL: Atraso AUMENTADO para 1000ms (1 segundo) para Android/Motorola ***
     async function switchCamera() {
       // 1. Impede gravações ativas antes de trocar
       if (isRecording) stopRecording(); 
@@ -263,8 +265,8 @@
       // 2. Trocamos o estado
       usingFrontCamera = !usingFrontCamera;
       
-      // 3. Adiciona um pequeno atraso (300ms) para liberar o hardware da câmera anterior
-      await new Promise(resolve => setTimeout(resolve, 300)); 
+      // 3. Adiciona um atraso longo (1000ms) para liberar o hardware da câmera anterior
+      await new Promise(resolve => setTimeout(resolve, 1000)); 
       
       // 4. Tenta iniciar a nova câmera
       await initCamera(true);
@@ -274,7 +276,7 @@
     async function takePhoto() {
       flashEffect();
       canvasFinal.width = 1080; canvasFinal.height = 1920;
-      drawVideoToCanvas(ctxFinal, 1080, 1920, true); // True para foto (sem espelhamento no desenho)
+      drawVideoToCanvas(ctxFinal, 1080, 1920);
       await drawImageLayer(ctxFinal, currentMolduraUrl, 1080, 1920);
       
       const ctxPrev = canvasPreview.getContext('2d');
@@ -310,7 +312,7 @@
         const canvasStream = canvasFinal.captureStream(30);
         
         // Tenta adicionar áudio se existir
-        if (stream.getAudioTracks().length > 0) {
+        if (stream && stream.getAudioTracks().length > 0) {
             canvasStream.addTrack(stream.getAudioTracks()[0]);
         }
 
@@ -391,8 +393,6 @@
       // Aplicar espelhamento na gravação (se for a câmera frontal)
       if (usingFrontCamera) {
         ctx.save();
-        // A imagem da câmera frontal é espelhada visualmente, então desenhamos ela
-        // espelhada de volta para que a gravação não fique invertida.
         ctx.scale(-1, 1);
         ctx.drawImage(video, -dx - dw, dy, dw, dh);
         ctx.restore();
