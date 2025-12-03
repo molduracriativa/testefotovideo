@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Câmera Estável V3</title>
+  <style>
+    :root {
+      --accent: #25D366;
+      --primary: #FF5722;
+      --bg-overlay: rgba(0, 0, 0, 0.65);
+    }
+    
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    body { 
+      margin: 0; 
+      background: #000; 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+      color: #fff; 
+      overflow: hidden; /* Impede rolagem */
+      width: 100vw;
+      height: 100vh;
+      /* Fallback e suporte a DVH (altura dinâmica do navegador mobile) */
+      height: 100dvh; 
+    }
+
+    /* Container Principal */
+    .frame { 
+      position: relative; 
+      width: 100%; 
+      height: 100%; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      background: #000;
+    }
+
+    /* Área da Câmera (Mantém proporção vertical de celular) */
+    .stage { 
+      position: relative; 
+      width: 100%; 
+      height: 100%; 
+      max-width: 100%;
+      /* Aspect ratio controlado via JS para preencher a tela ou manter proporção */
+      overflow: hidden; 
+      background: #111;
+    }
+
+    /* Elementos de vídeo e imagem */
+    video, #molduraPreview, #canvasPreview { 
+      position: absolute; 
+      top: 0; left: 0; 
+      width: 100%; 
+      height: 100%; 
+      object-fit: cover; 
+    }
+
+    /* Espelhamento visual apenas no vídeo (CSS) - Não afeta a captura */
+    video { transform: scaleX(1); transition: transform 0.3s; }
+    video.mirrored { transform: scaleX(-1); }
+
+    #molduraPreview { pointer-events: none; z-index: 5; }
+    
+    #canvasPreview { 
+      display: none; 
+      z-index: 6; 
+      background: #000;
+    }
+
+    /* --- UI --- */
+    .ui-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none; /* Deixa clicar no vídeo se precisar */
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20px;
+    }
+
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      pointer-events: auto;
+    }
+
+    .controls-bottom {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      pointer-events: auto;
+      padding-bottom: 20px;
+    }
+
+    /* Botões */
+    .btn { 
+      padding: 10px 16px; 
+      font-size: 14px; 
+      font-weight: 600;
+      border: 2px solid rgba(255,255,255,0.3); 
+      border-radius: 20px; 
+      background: var(--bg-overlay); 
+      color: #fff; 
+      cursor: pointer; 
+      backdrop-filter: blur(4px);
+    }
+    .btn.active { border-color: var(--accent); background: rgba(37, 211, 102, 0.2); color: var(--accent); }
+    
+    .frame-selector {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* Botão de Captura */
+    #captureBtn { 
+      width: 80px; 
+      height: 80px; 
+      border-radius: 50%; 
+      border: 4px solid #fff; 
+      background: rgba(255,255,255,0.2); 
+      cursor: pointer; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      transition: transform 0.1s;
+    }
+    #captureBtn:active { transform: scale(0.95); background: rgba(255,255,255,0.4); }
+    #captureBtn svg { width: 36px; height: 36px; fill: #fff; }
+
+    /* Tela Inicial */
+    #startScreen { 
+      position: absolute; 
+      inset: 0; 
+      background: #000; 
+      z-index: 50; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center; 
+      gap: 20px; 
+      text-align: center;
+    }
+    #startBtn {
+      padding: 18px 32px;
+      font-size: 20px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 50px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    /* Ações Pós-Foto */
+    #postCaptureActions {
+      display: none; /* Flex quando ativo */
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 300px;
+      pointer-events: auto;
+    }
+    .action-btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-save { background: var(--accent); color: #fff; }
+    .btn-new { background: #555; color: #fff; }
+
+    /* Flash */
+    .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 10; transition: opacity 0.1s; }
+  </style>
+</head>
+<body>
+
+  <div class="frame">
+    <div class="stage" id="stage">
+      <video id="camera" autoplay playsinline muted></video>
+      <canvas id="canvasPreview"></canvas>
+      <img id="molduraPreview" alt="" src="" />
+      <div class="flash" id="flash"></div>
+
+      <div class="ui-layer" id="cameraUI" style="display: none;">
+        <div class="top-bar">
+          <button class="btn" id="switchBtn">🔄 Trocar Câmera</button>
+        </div>
+
+        <div class="controls-bottom">
+          <div class="frame-selector">
+            <button class="btn active" id="m1Btn">Moldura 1</button>
+            <button class="btn" id="m2Btn">Moldura 2</button>
+          </div>
+
+          <button id="captureBtn" aria-label="Tirar Foto">
+            <svg viewBox="0 0 24 24"><path d="M12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/><path d="M20 5h-3.17L15 3H9L7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 14H4V7h16v12z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="ui-layer" id="resultUI" style="display: none; justify-content: flex-end; align-items: center;">
+        <div id="postCaptureActions">
+          <a id="downloadBtn" class="action-btn btn-save" download="foto_moldura.png">📥 Baixar Imagem</a>
+          <button id="shareBtn" class="action-btn btn-save" style="background: #3b5998;">📤 Compartilhar</button>
+          <button id="newPhotoBtn" class="action-btn btn-new">📸 Tirar Outra</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="startScreen">
+    <h2 style="margin-bottom:0">Câmera com Moldura</h2>
+    <p style="color:#aaa; margin-top:5px">Toque para iniciar</p>
+    <button id="startBtn">INICIAR CÂMERA</button>
+    <p id="errorMsg" style="color:red; font-size:12px; max-width:80%;"></p>
+  </div>
+
+  <canvas id="canvasFinal" style="display: none;"></canvas>
+
+  <script>
+    // Configurações
+    const MOLDURAS = {
+      'm1': 'moldura1.png',
+      'm2': 'moldura2.png'
+    };
+    let currentMolduraUrl = MOLDURAS['m1'];
+    let usingFrontCamera = true;
+    let stream = null;
+    let isCapturing = false;
+
+    // Elementos DOM
+    const video = document.getElementById('camera');
+    const stage = document.getElementById('stage');
+    const canvasPreview = document.getElementById('canvasPreview');
+    const ctxPreview = canvasPreview.getContext('2d');
+    const canvasFinal = document.getElementById('canvasFinal');
+    const ctxFinal = canvasFinal.getContext('2d'); // Alta resolução
+    const molduraPreview = document.getElementById('molduraPreview');
+    
+    const startScreen = document.getElementById('startScreen');
+    const cameraUI = document.getElementById('cameraUI');
+    const resultUI = document.getElementById('resultUI');
+    const postCaptureActions = document.getElementById('postCaptureActions');
+    const errorMsg = document.getElementById('errorMsg');
+
+    // Botões
+    document.getElementById('startBtn').addEventListener('click', initCamera);
+    document.getElementById('switchBtn').addEventListener('click', switchCamera);
+    document.getElementById('captureBtn').addEventListener('click', takePhoto);
+    document.getElementById('newPhotoBtn').addEventListener('click', resetCamera);
+    
+    // Configuração de Molduras
+    document.getElementById('m1Btn').addEventListener('click', (e) => setMoldura(e.target, 'm1'));
+    document.getElementById('m2Btn').addEventListener('click', (e) => setMoldura(e.target, 'm2'));
+    
+    // Inicialização
+    function setMoldura(btnElement, key) {
+      document.querySelectorAll('.frame-selector .btn').forEach(b => b.classList.remove('active'));
+      if(btnElement) btnElement.classList.add('active');
+      
+      currentMolduraUrl = MOLDURAS[key];
+      molduraPreview.src = currentMolduraUrl;
+    }
+    // Carrega a primeira moldura visualmente
+    setMoldura(document.getElementById('m1Btn'), 'm1');
+
+    // --- FUNÇÃO CORE: Iniciar Câmera (Blindada) ---
+    async function initCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+
+      // TRUQUE DE ESTABILIDADE:
+      // Não pedimos largura/altura ideal. Pedimos apenas "video".
+      // Isso evita erros em Androids baratos. O redimensionamento é feito no Canvas depois.
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: usingFrontCamera ? 'user' : 'environment'
+        }
+      };
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        
+        // CSS Mirroring apenas para visualização (selfie)
+        if (usingFrontCamera) {
+          video.classList.add('mirrored');
+        } else {
+          video.classList.remove('mirrored');
+        }
+
+        // Aguarda carregar para liberar UI
+        video.onloadedmetadata = () => {
+          video.play();
+          startScreen.style.display = 'none';
+          cameraUI.style.display = 'flex';
+        };
+
+      } catch (err) {
+        console.error("Erro Câmera:", err);
+        errorMsg.innerText = "Erro ao acessar câmera: " + err.name;
+        // Fallback: Tenta sem constraints de facingMode se falhar
+        if (constraints.video.facingMode) {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                video.srcObject = stream;
+                video.play();
+                startScreen.style.display = 'none';
+                cameraUI.style.display = 'flex';
+            } catch (e) {
+                alert("Não foi possível acessar a câmera.");
+            }
+        }
+      }
+    }
+
+    async function switchCamera() {
+      usingFrontCamera = !usingFrontCamera;
+      await initCamera();
+    }
+
+    // --- FUNÇÃO CORE: Captura e Processamento ---
+    async function takePhoto() {
+      if (isCapturing) return;
+      isCapturing = true;
+
+      // 1. Efeito Flash
+      const flash = document.getElementById('flash');
+      flash.style.opacity = '1';
+      setTimeout(() => flash.style.opacity = '0', 150);
+
+      // 2. Configura Tamanho do Canvas Final (Full HD Vertical)
+      // Usamos 1080x1920 fixo para garantir alta qualidade independente da tela do celular
+      canvasFinal.width = 1080;
+      canvasFinal.height = 1920;
+
+      // 3. Desenhar Vídeo com Object-Fit: Cover manual
+      // Esta matemática garante que o vídeo preencha o 1080x1920 sem distorcer
+      drawVideoToCanvas(ctxFinal, canvasFinal.width, canvasFinal.height);
+
+      // 4. Desenhar Moldura
+      await drawImageLayer(ctxFinal, currentMolduraUrl, canvasFinal.width, canvasFinal.height);
+
+      // 5. Mostrar Prévia (Copia do Final para o Canvas de tela)
+      canvasPreview.width = stage.clientWidth;
+      canvasPreview.height = stage.clientHeight;
+      ctxPreview.drawImage(canvasFinal, 0, 0, canvasPreview.width, canvasPreview.height);
+
+      // 6. Atualizar UI
+      video.style.display = 'none';
+      molduraPreview.style.display = 'none'; // Esconde a tag img, mostra o canvas
+      canvasPreview.style.display = 'block';
+      
+      cameraUI.style.display = 'none';
+      resultUI.style.display = 'flex';
+      postCaptureActions.style.display = 'flex';
+
+      prepareDownloadAndShare();
+      isCapturing = false;
+    }
+
+    // Matemática para simular "object-fit: cover" no Canvas
+    function drawVideoToCanvas(ctx, targetW, targetH) {
+      const vidW = video.videoWidth;
+      const vidH = video.videoHeight;
+      
+      // Proporções
+      const videoRatio = vidW / vidH;
+      const canvasRatio = targetW / targetH;
+      
+      let drawW, drawH, startX, startY;
+
+      if (videoRatio > canvasRatio) {
+        // Vídeo é mais "largo" que o canvas (cortar laterais)
+        drawH = targetH;
+        drawW = targetH * videoRatio;
+        startX = (targetW - drawW) / 2;
+        startY = 0;
+      } else {
+        // Vídeo é mais "alto" ou igual (cortar topo/base)
+        drawW = targetW;
+        drawH = targetW / videoRatio;
+        startX = 0;
+        startY = (targetH - drawH) / 2;
+      }
+
+      ctx.save();
+      
+      // ESPELHAMENTO NA FOTO FINAL:
+      // Se quiser que a foto final fique espelhada (como no preview),
+      // descomente as 2 linhas abaixo.
+      // Padrão atual: Foto "Real" (texto legível).
+      /*
+      if (usingFrontCamera) {
+          ctx.translate(targetW, 0);
+          ctx.scale(-1, 1);
+      }
+      */
+      
+      ctx.drawImage(video, startX, startY, drawW, drawH);
+      ctx.restore();
+    }
+
+    function drawImageLayer(ctx, url, w, h) {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve();
+        };
+        img.onerror = resolve; // Resolve mesmo com erro pra não travar
+        img.src = url;
+      });
+    }
+
+    function resetCamera() {
+      canvasPreview.style.display = 'none';
+      video.style.display = 'block';
+      molduraPreview.style.display = 'block';
+      resultUI.style.display = 'none';
+      cameraUI.style.display = 'flex';
+    }
+
+    // --- Compartilhamento e Download ---
+    function prepareDownloadAndShare() {
+      const downloadBtn = document.getElementById('downloadBtn');
+      const shareBtn = document.getElementById('shareBtn');
+      
+      // Gera URL para o botão de download
+      const dataUrl = canvasFinal.toDataURL('image/png');
+      downloadBtn.href = dataUrl;
+
+      // Configura botão de compartilhar (Web Share API)
+      shareBtn.onclick = async () => {
+        canvasFinal.toBlob(async (blob) => {
+          if (!blob) return;
+          const file = new File([blob], "foto_evento.png", { type: "image/png" });
+          
+          if (navigator.share && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: 'Foto com Moldura',
+                text: 'Olha minha foto!'
+              });
+            } catch (error) {
+              console.log('Compartilhamento cancelado', error);
+            }
+          } else {
+            // Fallback: Se não suportar share, clica no download
+            alert("Seu navegador não suporta compartilhamento direto. Baixando a imagem...");
+            downloadBtn.click();
+          }
+        }, 'image/png');
+      };
+    }
+  </script>
+</body>
+</html>
