@@ -1,111 +1,550 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moldura – Foto e Vídeo</title>
-  <style>
-    body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-    #cameraPreview { width: 100%; max-width: 420px; border-radius: 14px; background: #000; }
-    #frameOverlay { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; }
-    #previewContainer { position: relative; width: 100%; max-width: 420px; }
-    button { padding: 12px 18px; margin: 10px; border-radius: 10px; border: none; background: #0099ff; color: #fff; font-size: 16px; cursor: pointer; }
-    canvas { display: none; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Moldura Multinavegador — Vídeo + Áudio</title>
+<style>
+  :root{--accent:#25D366;--red:#ff3b30}
+  body{margin:0;background:#000;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;display:flex;flex-direction:column;align-items:center;gap:14px;padding:14px;height:100vh;box-sizing:border-box}
+  .stage{position:relative;width:100%;max-width:420px;aspect-ratio:9/16;background:#111;border-radius:12px;overflow:hidden}
+  video,canvas,img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  #canvasPreview{display:none} /* used for photographing preview */
+  .overlay-ui{position:relative;display:flex;gap:8px;width:100%;max-width:420px;justify-content:space-between;align-items:center}
+  button{padding:10px 14px;border-radius:10px;border:none;background:#ffffff10;color:#fff;cursor:pointer}
+  button.primary{background:linear-gradient(90deg,var(--accent),#4cd964);color:#000;font-weight:700}
+  .recording-badge{display:inline-block;background:var(--red);color:#fff;padding:6px 10px;border-radius:999px;font-weight:700}
+  .status{font-size:13px;color:#ccc}
+  #progress{width:100%;height:8px;background:#222;border-radius:8px;overflow:hidden}
+  #progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#4cd964)}
+  .hidden{display:none}
+  footer{font-size:12px;color:#999}
+</style>
 </head>
 <body>
-  <h2>Moldura – Captura Foto e Vídeo</h2>
 
-  <div id="previewContainer">
-    <video id="cameraPreview" autoplay playsinline></video>
-    <img id="frameOverlay" src="moldura.png" />
-  </div>
+<h3>Moldura — Foto & Vídeo (Áudio Incluso)</h3>
 
-  <div>
-    <button id="btnFoto">📸 Tirar Foto</button>
-    <button id="btnVideoStart">🎥 Iniciar Vídeo</button>
-    <button id="btnVideoStop" disabled>⏹ Parar Vídeo</button>
-  </div>
+<div class="stage" id="stage">
+  <!-- Video raw from camera shown underneath (mirrored if front). -->
+  <video id="camera" autoplay playsinline muted></video>
 
+  <!-- Canvas for drawing video frames + overlay (this is the source we capture). -->
   <canvas id="canvas"></canvas>
 
-  <script>
-    const video = document.getElementById("cameraPreview");
-    const frame = document.getElementById("frameOverlay");
-    const canvas = document.getElementById("canvas");
+  <!-- Final overlay frame (moldura) - customize the src -->
+  <img id="moldura" src="moldura1.png" alt="moldura" />
 
-    let mediaStream = null;
-    let recorder = null;
-    let videoBlobs = [];
+  <!-- Optional canvas preview for photo result -->
+  <canvas id="canvasPreview"></canvas>
+</div>
 
-    async function iniciarCamera() {
-      try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: { echoCancellation: true, noiseSuppression: true }
-        });
-        video.srcObject = mediaStream;
-      } catch (e) {
-        alert("Erro ao acessar a câmera: " + e);
+<div class="overlay-ui">
+  <div style="display:flex;gap:8px;align-items:center">
+    <button id="switchCam">🔁 Trocar</button>
+    <button id="photoBtn" class="">📸 Foto</button>
+    <button id="recordBtn" class="primary">🎥 Gravar</button>
+    <span id="timer" class="status">00:00</span>
+  </div>
+  <div style="text-align:right">
+    <div id="recBadge" class="recording-badge hidden">GRAVANDO</div>
+    <div id="status" class="status">Aguardando</div>
+  </div>
+</div>
+
+<div id="mergeUI" class="status hidden" style="width:100%;max-width:420px">
+  <div>Processando (merge) — pode demorar em celulares...</div>
+  <div id="progress"><i></i></div>
+</div>
+
+<div style="display:flex;gap:8px;flex-direction:column;max-width:420px;width:100%;">
+  <a id="downloadLink" class="status hidden" download>⬇️ Baixar</a>
+  <div class="status">Se preferir MP4 universal, usar o merge via FFmpeg (opcional) está incluído — será feito automaticamente quando necessário.</div>
+</div>
+
+<footer>Teste em Chrome/Firefox/Safari (iOS 15+ tem suporte parcial) — veja console para logs.</footer>
+
+<script>
+/*
+  Estratégia:
+  1) Start camera (video+audio if possible).
+  2) Continuously draw the camera video to canvas and draw the moldura overlay.
+  3) Try to record a mixed stream: canvas.captureStream() + audio tracks from camera stream.
+     - If MediaRecorder accepts mixed stream and records audio, we're done (single file).
+  4) If mixed MediaRecorder is not possible / fails to capture audio, record:
+     - videoRecorder -> canvas.captureStream() (video-only)
+     - audioRecorder -> audio-only stream (from microphone)
+     Then after stop, attempt to merge using ffmpeg.wasm.
+     - If ffmpeg.wasm merge fails or not supported, provide the two separate files for manual merging.
+*/
+
+const camera = document.getElementById('camera');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const moldura = document.getElementById('moldura');
+const canvasPreview = document.getElementById('canvasPreview');
+
+const switchBtn = document.getElementById('switchCam');
+const photoBtn = document.getElementById('photoBtn');
+const recordBtn = document.getElementById('recordBtn');
+const timerEl = document.getElementById('timer');
+const statusEl = document.getElementById('status');
+const recBadge = document.getElementById('recBadge');
+const downloadLink = document.getElementById('downloadLink');
+const mergeUI = document.getElementById('mergeUI');
+const progressBar = document.querySelector('#progress > i');
+
+let usingFront = true;
+let mediaStream = null;          // full camera+mic stream
+let audioOnlyStream = null;      // separate audio-only stream when needed
+let canvasStream = null;         // stream captured from canvas
+let framesRAF = null;
+let cameraReady = false;
+
+// Recorders & buffers
+let mediaRecorder = null;        // used when we can record mixedStream
+let videoRecorder = null;        // video-only when fallback
+let audioRecorder = null;        // audio-only when fallback
+let recordedChunks = [];
+let recordedVideoChunks = [];
+let recordedAudioChunks = [];
+
+let recordingStart = 0;
+let timerInterval = null;
+
+// FFmpeg WASM (lazy load only when needed)
+let ffmpeg = null;
+let ffmpegLoaded = false;
+const useFFmpegWasm = true; // try to merge in-browser if needed
+
+// Preload moldura image to guarantee draw
+moldura.decode?.().catch(()=>{}); // best-effort
+
+// UTILS
+function log(...args){ console.log('[moldura]', ...args) }
+function setStatus(t){ statusEl.textContent = t; }
+function setProgress(p){ progressBar.style.width = Math.min(100, Math.max(0,p)) + '%'; }
+
+// Start camera with best-effort constraints
+async function startCamera(tryAudio = true){
+  if(mediaStream){ mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  setStatus('Solicitando câmera' + (tryAudio ? ' + microfone' : ' (sem microfone)') + '...');
+  const facingMode = usingFront ? 'user' : 'environment';
+  const constraints = {
+    video: { facingMode, width:{ideal:1280}, height:{ideal:720} },
+    audio: tryAudio ? { echoCancellation:true, noiseSuppression:true } : false
+  };
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    camera.srcObject = mediaStream;
+    // if audio exists, also prepare audioOnlyStream for fallback merges
+    try{
+      const audioTracks = mediaStream.getAudioTracks();
+      if(audioTracks && audioTracks.length){
+        audioOnlyStream = new MediaStream(audioTracks.map(t => t.clone ? t.clone() : t));
+      } else {
+        audioOnlyStream = null;
       }
+    }catch(e){ audioOnlyStream = null; log('audioOnlyStream init fail', e) }
+    camera.onloadedmetadata = () => {
+      camera.play().catch(()=>{});
+      // set canvas size to video natural size (rotate if needed)
+      canvas.width = camera.videoWidth || 720;
+      canvas.height = camera.videoHeight || 1280;
+      canvasPreview.width = canvas.width;
+      canvasPreview.height = canvas.height;
+      cameraReady = true;
+      setStatus('Câmera pronta');
+      startDrawLoop();
+    };
+  } catch (err){
+    console.error('getUserMedia error', err);
+    if(tryAudio){
+      // retry without audio
+      return startCamera(false);
+    }
+    setStatus('Erro ao acessar câmera/microfone: ' + (err.message || err.name));
+  }
+}
+
+function startDrawLoop(){
+  if(framesRAF) cancelAnimationFrame(framesRAF);
+  function loop(){
+    if(!cameraReady) return;
+    // draw video frame
+    ctx.save();
+    // Mirror if front camera
+    if(usingFront){
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1,1);
+    }
+    ctx.drawImage(camera, 0, 0, canvas.width, canvas.height);
+    if(usingFront) ctx.setTransform(1,0,0,1,0,0); // reset if mirrored
+    ctx.restore();
+
+    // draw moldura on top
+    if(moldura.complete){
+      ctx.drawImage(moldura, 0, 0, canvas.width, canvas.height);
+    }
+    framesRAF = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// Switch camera
+async function switchCamera(){
+  usingFront = !usingFront;
+  await startCamera(true);
+}
+
+// TAKE PHOTO
+function takePhoto(){
+  if(!cameraReady){ alert('Câmera não pronta'); return; }
+  // draw once (already looping) and copy to preview canvas
+  canvasPreview.getContext('2d').drawImage(canvas,0,0,canvasPreview.width,canvasPreview.height);
+  canvasPreview.style.display = 'block';
+  canvas.style.display = 'none';
+  setTimeout(()=>{ canvas.style.display = 'block'; canvasPreview.style.display='none'; }, 1200);
+
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `foto_${Date.now()}.png`; a.click();
+    setStatus('Foto salva');
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+  }, 'image/png');
+}
+
+// RECORDING FLOW
+async function startRecording(){
+  if(!cameraReady){ alert('Câmera não pronta'); return; }
+
+  recordedChunks = []; recordedVideoChunks = []; recordedAudioChunks = [];
+
+  setStatus('Preparando gravação...');
+  recordBtn.disabled = true;
+  photoBtn.disabled = true;
+
+  // capture canvas stream
+  canvasStream = canvas.captureStream(30); // 30fps target
+
+  // try to combine audio tracks
+  const audioTracks = mediaStream ? mediaStream.getAudioTracks() : [];
+  let mixedStream = null;
+
+  if(audioTracks && audioTracks.length){
+    // Create mixed stream: canvas video tracks + mic audio tracks
+    mixedStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioTracks // do not clone - some browsers require original tracks
+    ]);
+    log('Tentando usar mixedStream com audio:', audioTracks.map(t=>t.kind+'@'+t.label));
+  } else {
+    mixedStream = canvasStream; // no mic available
+    log('Sem faixas de áudio detectadas no stream principal');
+  }
+
+  // Decide preferred mime types (prioritize webm+opus for broad audio support)
+  const mimeCandidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp8',
+    'video/webm',
+    'video/mp4' // mp4 often unsupported by MediaRecorder
+  ];
+  let chosenMime = mimeCandidates.find(m => {
+    try { return MediaRecorder.isTypeSupported(m); }
+    catch(e){ return false; }
+  }) || '';
+
+  // Try using a single MediaRecorder for mixedStream
+  let singleRecorderWorks = false;
+  try {
+    mediaRecorder = new MediaRecorder(mixedStream, chosenMime ? { mimeType: chosenMime } : undefined);
+    mediaRecorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      log('mediaRecorder stopped; single file recorded, bytes:', recordedChunks.reduce((s,b)=>s+b.size,0));
+      finalizeSingleFile();
+    };
+    mediaRecorder.onerror = e => { console.error('mediaRecorder error', e) };
+    mediaRecorder.start(1000);
+    singleRecorderWorks = true;
+    log('MediaRecorder iniciado para mixedStream com mime:', chosenMime);
+  } catch (e) {
+    console.warn('Start single mediaRecorder failed:', e);
+    singleRecorderWorks = false;
+  }
+
+  // If single recorder failed to start due to mime or mixedStream issues, fallback to dual recording
+  if(!singleRecorderWorks){
+    setStatus('Fallback: gravando áudio e vídeo separadamente (merge posterior)');
+    // video-only recorder (canvasStream)
+    try {
+      const vmime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      videoRecorder = new MediaRecorder(canvasStream, vmime ? { mimeType: vmime } : undefined);
+      videoRecorder.ondataavailable = e => { if(e.data && e.data.size) recordedVideoChunks.push(e.data); };
+    } catch(e){
+      console.error('videoRecorder start failed', e);
+      alert('Impossível iniciar gravação de vídeo neste navegador.');
+      recordBtn.disabled = false; photoBtn.disabled = false;
+      setStatus('Erro na gravação');
+      return;
     }
 
-    window.onload = iniciarCamera;
+    // audio-only recorder (from mic)
+    if(audioTracks && audioTracks.length){
+      try {
+        // Some browsers require creating a brand new stream that only contains audio tracks (so clone when possible)
+        const aStream = new MediaStream(audioTracks.map(t => t.clone ? t.clone() : t));
+        audioRecorder = new MediaRecorder(aStream, 'audio/webm;codecs=opus');
+        audioRecorder.ondataavailable = e => { if(e.data && e.data.size) recordedAudioChunks.push(e.data); };
+      } catch(e){
+        console.warn('audioRecorder start failed', e);
+        audioRecorder = null;
+      }
+    } else {
+      audioRecorder = null;
+    }
 
-    document.getElementById("btnFoto").onclick = () => {
-      const w = video.videoWidth;
-      const h = video.videoHeight;
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
+    // Start both recorders
+    try { videoRecorder.start(1000); } catch(e){ console.error('videoRecorder.start failed', e) }
+    if(audioRecorder){ try{ audioRecorder.start(1000); }catch(e){ console.error('audioRecorder.start failed', e); audioRecorder=null } }
 
-      ctx.drawImage(video, 0, 0, w, h);
-      ctx.drawImage(frame, 0, 0, w, h);
-
-      canvas.toBlob((blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "foto_moldura.png";
-        a.click();
-      }, "image/png");
+    // Mark event handlers to finalize after stop
+    videoRecorder.onstop = async () => {
+      log('videoRecorder stopped, recordedVideoChunks size=', recordedVideoChunks.reduce((s,b)=>s+b.size,0));
+      // if audio exists and is still recording, stop it
+      if(audioRecorder && audioRecorder.state !== 'inactive') audioRecorder.stop();
+      await finalizeSeparatedFiles(); // will attempt merge
     };
 
-    document.getElementById("btnVideoStart").onclick = () => {
-      videoBlobs = [];
-
-      const mimeOptions = [
-        "video/webm;codecs=vp9,opus",
-        "video/webm;codecs=vp8,opus",
-        "video/webm",
-        "video/mp4"
-      ];
-
-      let escolhido = mimeOptions.find(t => MediaRecorder.isTypeSupported(t));
-
-      recorder = new MediaRecorder(mediaStream, { mimeType: escolhido });
-
-      recorder.ondataavailable = (e) => videoBlobs.push(e.data);
-
-      recorder.onstop = () => {
-        const fullBlob = new Blob(videoBlobs, { type: escolhido });
-        const url = URL.createObjectURL(fullBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "video_moldura" + (escolhido.includes("webm") ? ".webm" : ".mp4");
-        a.click();
+    if(audioRecorder){
+      audioRecorder.onstop = () => {
+        log('audioRecorder stopped, audio bytes=', recordedAudioChunks.reduce((s,b)=>s+b.size,0));
       };
+    }
+  }
 
-      recorder.start();
-      document.getElementById("btnVideoStart").disabled = true;
-      document.getElementById("btnVideoStop").disabled = false;
-    };
+  // UI start
+  recBadge.classList.remove('hidden');
+  recordBtn.textContent = '⏹ Parar';
+  recordBtn.classList.add('primary');
+  recordBtn.disabled = false;
+  recordingStart = Date.now();
+  timerInterval = setInterval(updateTimer, 500);
+  setStatus('Gravando...');
+}
 
-    document.getElementById("btnVideoStop").onclick = () => {
-      recorder.stop();
-      document.getElementById("btnVideoStart").disabled = false;
-      document.getElementById("btnVideoStop").disabled = true;
+function stopRecording(){
+  // Stop either single recorder or fallback recorders
+  if(mediaRecorder && mediaRecorder.state !== 'inactive'){
+    mediaRecorder.stop();
+  }
+  if(videoRecorder && videoRecorder.state !== 'inactive'){
+    videoRecorder.stop();
+  }
+  if(audioRecorder && audioRecorder.state !== 'inactive'){
+    audioRecorder.stop();
+  }
+  // UI stop
+  recBadge.classList.add('hidden');
+  recordBtn.textContent = '🎥 Gravar';
+  photoBtn.disabled = false;
+  clearInterval(timerInterval);
+  timerEl.textContent = '00:00';
+  setStatus('Finalizando gravação...');
+}
+
+// finalize when single mixedMediaRecorder used
+function finalizeSingleFile(){
+  const blob = new Blob(recordedChunks, { type: recordedChunks[0]?.type || 'video/webm' });
+  const url = URL.createObjectURL(blob);
+  downloadLink.href = url;
+  downloadLink.download = `video_${Date.now()}.${blob.type.includes('mp4') ? 'mp4' : 'webm'}`;
+  downloadLink.textContent = '⬇️ Baixar (com áudio)';
+  downloadLink.classList.remove('hidden');
+  setStatus('Arquivo pronto (único arquivo com áudio).');
+  // auto stop draw loop? keep camera live
+}
+
+// finalize when we have separate video+audio files
+async function finalizeSeparatedFiles(){
+  // Build blobs
+  const vblob = new Blob(recordedVideoChunks, { type: recordedVideoChunks[0]?.type || 'video/webm' });
+  const ablob = recordedAudioChunks.length ? new Blob(recordedAudioChunks, { type: recordedAudioChunks[0]?.type || 'audio/webm' }) : null;
+
+  // If no audio recorded, offer video-only download
+  if(!ablob){
+    const url = URL.createObjectURL(vblob);
+    downloadLink.href = url;
+    downloadLink.download = `video_noaudio_${Date.now()}.webm`;
+    downloadLink.textContent = '⬇️ Baixar (vídeo sem áudio)';
+    downloadLink.classList.remove('hidden');
+    setStatus('Gravação completa (sem áudio obtido).');
+    return;
+  }
+
+  // Try to merge using ffmpeg.wasm if available and allowed
+  setStatus('Tentando mesclar áudio + vídeo (ffmpeg.wasm)...');
+  mergeUI.classList.remove('hidden');
+  setProgress(0);
+
+  // Lazy load ffmpeg if needed
+  if(useFFmpegWasm && !ffmpegLoaded){
+    try {
+      // load ffmpeg core (uses @ffmpeg/ffmpeg from unpkg). If blocked by CSP, skip merge.
+      setStatus('Carregando ffmpeg.wasm (pode demorar)...');
+      await loadFFmpeg(); // loads ffmpeg variable
+      ffmpegLoaded = true;
+    } catch(e){
+      console.warn('ffmpeg load failed', e);
+      ffmpegLoaded = false;
+    }
+  }
+
+  if(ffmpegLoaded && ffmpeg){
+    try {
+      const mergedUrl = await mergeWithFFmpeg(vblob, ablob);
+      downloadLink.href = mergedUrl;
+      downloadLink.download = `video_merged_${Date.now()}.mp4`;
+      downloadLink.textContent = '⬇️ Baixar (MP4 mesclado)';
+      downloadLink.classList.remove('hidden');
+      setStatus('Merge concluído — baixe o MP4.');
+    } catch(e){
+      console.error('mergeWithFFmpeg error', e);
+      // fallback: provide separate files for manual merge
+      provideSeparateFiles(vblob, ablob);
+      setStatus('Falha no merge automático; arquivos separados prontos.');
+    }
+  } else {
+    // No ffmpeg available — give both files for manual merge elsewhere
+    provideSeparateFiles(vblob, ablob);
+    setStatus('FFmpeg indisponível — baixe arquivos separados.');
+  }
+
+  mergeUI.classList.add('hidden');
+}
+
+function provideSeparateFiles(vblob, ablob){
+  // create a zip or provide two links? Simpler: provide a small UI allowing to download each
+  // We'll set downloadLink to the video and also trigger a second link for audio
+  const vurl = URL.createObjectURL(vblob);
+  const aurl = URL.createObjectURL(ablob);
+  downloadLink.href = vurl;
+  downloadLink.download = `video_${Date.now()}.webm`;
+  downloadLink.textContent = '⬇️ Baixar vídeo (webm)';
+  downloadLink.classList.remove('hidden');
+
+  // Also create audio link appended
+  let existing = document.getElementById('audioLink');
+  if(existing) existing.remove();
+  const aLink = document.createElement('a');
+  aLink.id = 'audioLink';
+  aLink.href = aurl;
+  aLink.download = `audio_${Date.now()}.webm`;
+  aLink.textContent = '⬇️ Baixar áudio (webm)';
+  aLink.className = 'status';
+  aLink.style.display = 'block';
+  downloadLink.parentNode.appendChild(aLink);
+  setStatus('Baixe ambos os arquivos e utilize FFmpeg no servidor/desktop para mesclar se desejar.');
+}
+
+// TIMER
+function updateTimer(){
+  const s = Math.floor((Date.now() - recordingStart)/1000);
+  const mm = String(Math.floor(s/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  timerEl.textContent = `${mm}:${ss}`;
+}
+
+// FFmpeg WASM load + merge logic
+async function loadFFmpeg(){
+  if(window.createFFmpeg){
+    // already available via <script> global (some pages might pre-load it)
+    ffmpeg = window.createFFmpeg({ log:true });
+    await ffmpeg.load();
+    return;
+  }
+
+  // dynamic import from unpkg (uses ESM loader). We try the UMD build fallback.
+  // NOTE: unpkg CDN may be blocked in some environments. Handle failure gracefully.
+  setStatus('Baixando ffmpeg.wasm (CDN)...');
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/@ffmpeg/ffmpeg@0.11.8/dist/ffmpeg.min.js';
+    script.onload = async () => {
+      try {
+        ffmpeg = window.FFmpeg.createFFmpeg({ log: true, progress: p => {
+          if(p && p.ratio) setProgress(Math.round(p.ratio * 100));
+        }});
+        await ffmpeg.load();
+        resolve();
+      } catch (e){ reject(e); }
     };
-  </script>
+    script.onerror = (e) => reject(e);
+    document.head.appendChild(script);
+  });
+}
+
+async function mergeWithFFmpeg(videoBlob, audioBlob){
+  // returns object URL to merged mp4
+  // Write files to ffmpeg FS, run merge command then read out mp4
+  const { name: vname } = { name: 'video.webm' };
+  const { name: aname } = { name: 'audio.webm' };
+  setStatus('Enviando arquivos para ffmpeg...');
+  const vUint = new Uint8Array(await videoBlob.arrayBuffer());
+  const aUint = new Uint8Array(await audioBlob.arrayBuffer());
+
+  ffmpeg.FS('writeFile', vname, vUint);
+  ffmpeg.FS('writeFile', aname, aUint);
+
+  setStatus('Executando comando ffmpeg para transcodificar e mesclar...');
+  // Use -c:v copy if possible; but webm->mp4 may require re-encoding.
+  // We'll transcode to H264 + AAC (compatível broadly). Might be slow on mobile.
+  // Command: convert input webm (vp8/9) to mp4 h264 + aac
+  try {
+    await ffmpeg.run(
+      '-i', vname,
+      '-i', aname,
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-c:a', 'aac',
+      '-b:a','128k',
+      '-shortest',
+      'output.mp4'
+    );
+  } catch(e){
+    // Try a simpler command (some builds don't include libx264)
+    console.warn('ffmpeg libx264 failed, trying copy/transcode fallback', e);
+    try {
+      await ffmpeg.run('-i', vname, '-i', aname, '-c:v', 'copy', '-c:a', 'copy', 'output.mp4');
+    } catch(e2){
+      throw e2;
+    }
+  }
+
+  setStatus('Lendo arquivo final...');
+  const data = ffmpeg.FS('readFile', 'output.mp4');
+  const outBlob = new Blob([data.buffer], { type: 'video/mp4' });
+  const outUrl = URL.createObjectURL(outBlob);
+
+  // cleanup
+  try { ffmpeg.FS('unlink', vname); ffmpeg.FS('unlink', aname); ffmpeg.FS('unlink', 'output.mp4'); } catch(e){}
+  setProgress(100);
+  return outUrl;
+}
+
+// UI wiring
+switchBtn.addEventListener('click', () => { switchCamera(); });
+photoBtn.addEventListener('click', () => { takePhoto(); });
+recordBtn.addEventListener('click', () => {
+  if(recordBtn.textContent.includes('Gravar')) startRecording();
+  else stopRecording();
+});
+
+// init
+startCamera(true);
+
+</script>
 </body>
 </html>
