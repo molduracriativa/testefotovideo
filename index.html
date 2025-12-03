@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V12 - Áudio + Vídeo + Moldura</title>
+  <title>Crispoparte V12 - FINAL (Áudio + Vídeo + Moldura)</title>
   <style>
     :root {
       --accent: #25D366;
@@ -104,33 +104,24 @@
   <canvas id="canvasFinal" style="display: none;"></canvas>
 
   <script>
-    /*
-      INSTRUÇÕES IMPORTANTES:
-      - Defina MERGE_SERVER para o endpoint do seu servidor Node/FFmpeg (ex: 'http://192.168.0.10:4000/merge').
-      - Se não quiser usar servidor, deixe vazio ('') — o cliente tentará gravar mixedStream e, se não for possível,
-        oferecerá arquivos separados (vídeo.webm + audio.webm) para download.
-    */
-    const MERGE_SERVER = ''; // <-- coloque aqui: 'http://SEU_SERVIDOR:4000/merge' se quiser merge no servidor
-
     // --- Config ---
+    const MERGE_SERVER = ''; // se quiser mesclar no servidor, coloque aqui 'http://IP:4000/merge'
     const MOLDURAS = { 'm1': 'moldura1.png', 'm2': 'moldura2.png' };
     let currentMolduraUrl = MOLDURAS['m1'];
-    let currentMolduraImg = new Image();
-    currentMolduraImg.crossOrigin = "anonymous";
-    currentMolduraImg.src = currentMolduraUrl;
+    let currentMolduraImg = new Image(); currentMolduraImg.crossOrigin = "anonymous"; currentMolduraImg.src = currentMolduraUrl;
 
     let usingFrontCamera = true;
-    let stream = null;             // camera + mic (se disponível)
+    let stream = null;
     let currentMode = 'photo';
     let isRecording = false;
 
-    let mediaRecorder = null;     // single mixed recorder when possible
-    let videoRecorder = null;     // fallback video-only recorder
-    let audioRecorder = null;     // fallback audio-only recorder
+    let mediaRecorder = null;
+    let videoRecorder = null;
+    let audioRecorder = null;
 
-    let recordedChunks = [];      // for single mixed file
-    let recordedVideoChunks = []; // fallback video
-    let recordedAudioChunks = []; // fallback audio
+    let recordedChunks = [];
+    let recordedVideoChunks = [];
+    let recordedAudioChunks = [];
 
     let recordingStartTime = 0;
     let animationFrameId = null;
@@ -139,7 +130,6 @@
     let finalMimeType = null;
     let finalFileExtension = null;
 
-    // file state
     let currentBlob = null;
     let currentBlobUrl = null;
     let currentFileName = null;
@@ -148,7 +138,7 @@
     // --- DOM Elements ---
     const video = document.getElementById('camera');
     const stage = document.getElementById('stage');
-    const canvasPreview = document.getElementById('canvasPreview'); // this canvas used visually sometimes
+    const canvasPreview = document.getElementById('canvasPreview');
     const videoPreview = document.getElementById('videoPreview');
     const molduraPreview = document.getElementById('molduraPreview');
     const canvasFinal = document.getElementById('canvasFinal');
@@ -186,9 +176,8 @@
         }
     });
 
-    // --- Helpers ---
     function setStatus(s){ statusMsg.innerText = s; }
-    function log(...args){ console.log('[crispoparte]', ...args); }
+    function log(...a){ console.log('[crispoparte]', ...a); }
 
     // --- Moldura / UI ---
     function setMode(mode) {
@@ -211,7 +200,7 @@
     // --- Camera init ---
     async function initCamera(tryAudio = true) {
       if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(t=>t.stop());
         stream = null;
       }
       setStatus("Solicitando permissões...");
@@ -219,8 +208,8 @@
 
       const currentFacingMode = usingFrontCamera ? 'user' : 'environment';
       const constraintsList = [
+        { video: { facingMode: currentFacingMode, width: { ideal: 1920 }, height: { ideal: 1080 } } },
         { video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } } },
-        { video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } } },
         { video: { facingMode: currentFacingMode } }
       ];
 
@@ -252,15 +241,16 @@
     function handleStreamSuccess(newStream) {
         stream = newStream;
         video.srcObject = stream;
-        if (usingFrontCamera) video.classList.add('mirrored');
-        else video.classList.remove('mirrored');
-
+        if (usingFrontCamera) video.classList.add('mirrored'); else video.classList.remove('mirrored');
         video.onloadedmetadata = () => {
           video.play().catch(()=>{});
           startScreen.style.display = 'none';
           cameraUI.style.display = 'flex';
           setStatus('Pronto');
           errorMsg.innerText = "";
+          // ensure canvasFinal is set to unified 1080x1920
+          canvasFinal.width = 1080;
+          canvasFinal.height = 1920;
         };
     }
 
@@ -285,25 +275,21 @@
       canvasFinal.toBlob(blob => { showResult('image', blob); }, 'image/png');
     }
 
-    // --- Recording (audio + canvas) ---
+    // --- Recording (audio + canvas unified 1080x1920) ---
     async function startRecording() {
         isRecording = true;
         captureBtn.classList.add('recording');
         recordingTimer.style.display = 'block';
         recordingStartTime = Date.now();
-        recordedChunks = [];
-        recordedVideoChunks = [];
-        recordedAudioChunks = [];
-        finalMimeType = null;
-        finalFileExtension = null;
+        recordedChunks = []; recordedVideoChunks = []; recordedAudioChunks = [];
+        finalMimeType = null; finalFileExtension = null;
 
-        canvasFinal.width = 720; canvasFinal.height = 1280;
+        canvasFinal.width = 1080; canvasFinal.height = 1920;
 
-        // loop draw
         const loop = () => {
             if (!isRecording) return;
-            drawVideoToCanvas(ctxFinal, 720, 1280);
-            if (currentMolduraImg && currentMolduraImg.complete) ctxFinal.drawImage(currentMolduraImg, 0, 0, 720, 1280);
+            drawVideoToCanvas(ctxFinal, 1080, 1920);
+            if (currentMolduraImg && currentMolduraImg.complete) ctxFinal.drawImage(currentMolduraImg, 0, 0, 1080, 1920);
             updateTimer();
             animationFrameId = requestAnimationFrame(loop);
         };
@@ -312,73 +298,62 @@
         // capture canvas stream (video)
         canvasStream = canvasFinal.captureStream(30);
 
-        // try to include mic audio tracks
+        // attach audio tracks if available (microphone)
         const audioTracks = stream ? stream.getAudioTracks() : [];
-        let mixedStream;
         if (audioTracks && audioTracks.length > 0) {
-            // Attempt to use original audio tracks + canvas video
-            mixedStream = new MediaStream([
-              ...canvasStream.getVideoTracks(),
-              ...audioTracks
-            ]);
-        } else {
-            mixedStream = canvasStream;
-            console.warn('Nenhuma faixa de áudio detectada no stream principal');
+          try {
+            audioTracks.forEach(track => {
+              // Some browsers support clone(); otherwise add the original
+              try { canvasStream.addTrack(track.clone ? track.clone() : track); }
+              catch(e){ try{ canvasStream.addTrack(track); }catch(_){ console.warn('não foi possível adicionar track', _); } }
+            });
+          } catch(e) {
+            console.warn('Erro ao anexar audioTracks ao canvasStream', e);
+          }
         }
 
-        // choose preferred mime
-        const preferredMimeTypes = [
-            'video/webm;codecs=vp9,opus',
-            'video/webm;codecs=vp8,opus',
-            'video/webm',
-            'video/mp4'
+        // prefer webm+opus (broad audio support) then webm/vp8 then mp4 fallback
+        const preferred = [
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm;codecs=vp8',
+          'video/webm',
+          'video/mp4'
         ];
-        let selectedMimeType = null;
-        for (const m of preferredMimeTypes) {
-            try {
-              if (m && MediaRecorder.isTypeSupported(m)) {
-                  selectedMimeType = m;
-                  break;
-              }
-            } catch(e){}
+        let chosen = '';
+        for (const m of preferred) {
+          try { if (m && MediaRecorder.isTypeSupported(m)) { chosen = m; break; } }
+          catch(e){}
         }
-        // fallback
-        if (!selectedMimeType) selectedMimeType = '';
-
-        finalMimeType = selectedMimeType || 'video/webm';
+        finalMimeType = chosen || 'video/webm';
         finalFileExtension = finalMimeType.includes('mp4') ? 'mp4' : 'webm';
 
-        // Try single MediaRecorder with mixed stream
-        let startedSingle = false;
+        // Try single mixed recorder
+        let started = false;
         try {
-            mediaRecorder = selectedMimeType ? new MediaRecorder(mixedStream, { mimeType: selectedMimeType }) : new MediaRecorder(mixedStream);
-            mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recordedChunks.push(e.data); };
-            mediaRecorder.onstop = () => {
-              // single mixed file ready
-              finishVideoSingle();
-            };
-            mediaRecorder.onerror = (e) => console.error('mediaRecorder error', e);
-            mediaRecorder.start(1000);
-            startedSingle = true;
-            setStatus('Gravando (single stream) ...');
-            log('MediaRecorder started (single) mime:', selectedMimeType);
-        } catch (err) {
-            console.warn('Falha ao iniciar MediaRecorder single (mixedStream):', err);
-            startedSingle = false;
+          mediaRecorder = finalMimeType ? new MediaRecorder(canvasStream, { mimeType: finalMimeType }) : new MediaRecorder(canvasStream);
+          mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recordedChunks.push(e.data); };
+          mediaRecorder.onerror = (e) => console.error('mediaRecorder error', e);
+          mediaRecorder.onstop = () => finishVideoSingle();
+          mediaRecorder.start(1000);
+          started = true;
+          setStatus('Gravando (single) ...');
+        } catch (e) {
+          console.warn('Falha ao iniciar MediaRecorder mixed:', e);
+          started = false;
         }
 
-        if (!startedSingle) {
-          // Fallback: record video and audio separately
-          setStatus('Fallback: será gravado vídeo e áudio separados (merge posterior)');
+        // Fallback: record video and audio separately
+        if (!started) {
+          setStatus('Fallback: gravando vídeo e áudio separados (merge posterior)');
           try {
-            const vmime = preferredMimeTypes.find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){return false;} }) || '';
+            const vmime = preferred.find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; } }) || '';
             videoRecorder = vmime ? new MediaRecorder(canvasStream, { mimeType: vmime }) : new MediaRecorder(canvasStream);
             videoRecorder.ondataavailable = e => { if (e.data && e.data.size) recordedVideoChunks.push(e.data); };
 
-            // audio recorder from mic (if available)
             if (audioTracks && audioTracks.length > 0) {
+              // build audio-only stream
               const aStream = new MediaStream(audioTracks.map(t => t.clone ? t.clone() : t));
-              // prefer audio/webm;codecs=opus
               let ami = 'audio/webm;codecs=opus';
               try { if (!MediaRecorder.isTypeSupported(ami)) ami = ''; } catch(e){ ami = ''; }
               audioRecorder = ami ? new MediaRecorder(aStream, { mimeType: ami }) : new MediaRecorder(aStream);
@@ -388,19 +363,15 @@
             }
 
             videoRecorder.onstop = async () => {
-              // ensure audio stops as well
               try { if (audioRecorder && audioRecorder.state !== 'inactive') audioRecorder.stop(); } catch(e){}
               await finalizeSeparatedFiles();
             };
 
             videoRecorder.start(1000);
             if (audioRecorder) audioRecorder.start(1000);
-
-            setStatus('Gravando vídeo e áudio separadamente...');
-            log('Fallback recorders started');
+            setStatus('Gravando vídeo e áudio separados...');
           } catch (e) {
-            console.error('Erro ao iniciar fallback recorders', e);
-            alert('Não foi possível iniciar a gravação neste navegador.');
+            console.error('Erro no fallback recorders', e);
             stopEverythingAfterError();
           }
         }
@@ -410,99 +381,96 @@
       isRecording = false;
       captureBtn.classList.remove('recording');
       cancelAnimationFrame(animationFrameId);
-      try {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-      } catch(e){}
-      try {
-        if (videoRecorder && videoRecorder.state !== 'inactive') videoRecorder.stop();
-      } catch(e){}
-      try {
-        if (audioRecorder && audioRecorder.state !== 'inactive') audioRecorder.stop();
-      } catch(e){}
+      try { if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch(e){}
+      try { if (videoRecorder && videoRecorder.state !== 'inactive') videoRecorder.stop(); } catch(e){}
+      try { if (audioRecorder && audioRecorder.state !== 'inactive') audioRecorder.stop(); } catch(e){}
       recordingTimer.style.display = 'none';
       recordingTimer.innerText = "00:00";
-      setStatus('Finalizando gravação...');
+      setStatus('Processando gravação...');
     }
 
-    // called when single mixed recorder finished
+    // Single mixed recorder finished
     function finishVideoSingle() {
-      const simpleMimeType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
-      const blob = new Blob(recordedChunks, { type: simpleMimeType });
-      const videoURL = URL.createObjectURL(blob);
-      videoPreview.src = videoURL;
+      const simpleType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
+      const blob = new Blob(recordedChunks, { type: simpleType });
+      // basic sanity check
+      if (!blob || blob.size < 2000) {
+        alert('Erro ao gerar o arquivo de vídeo. Tente novamente.');
+        resetCamera();
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      videoPreview.src = url;
+      videoPreview.style.display = 'block';
       videoPreview.muted = false;
       videoPreview.controls = true;
-      videoPreview.style.display = 'block';
       try { videoPreview.play().catch(()=>{}); } catch(e){}
-      showResult('video', blob);
-      setStatus('Gravação finalizada (arquivo único com áudio).');
+      showResult('video', blob, url);
+      setStatus('Gravação pronta (arquivo único).');
     }
 
-    // finalize when fallback produced separate files
+    // finalize fallback separate files
     async function finalizeSeparatedFiles() {
       const vblob = new Blob(recordedVideoChunks, { type: recordedVideoChunks[0]?.type || 'video/webm' });
       const ablob = recordedAudioChunks.length ? new Blob(recordedAudioChunks, { type: recordedAudioChunks[0]?.type || 'audio/webm' }) : null;
 
-      // If no audio recorded -> provide video-only
       if (!ablob) {
-        showResult('video', vblob);
-        setStatus('Gravado vídeo (sem áudio).');
+        // no audio -> provide video only
+        const url = URL.createObjectURL(vblob);
+        videoPreview.src = url; videoPreview.style.display = 'block'; videoPreview.muted = false; videoPreview.controls = true;
+        showResult('video', vblob, url);
+        setStatus('Gravado (sem áudio).');
         return;
       }
 
-      // If MERGE_SERVER configured, upload and get merged MP4
+      // if MERGE_SERVER configured, upload to server and get MP4 back
       if (MERGE_SERVER && MERGE_SERVER.trim()) {
-        setStatus('Enviando para servidor para mesclar (aguarde)...');
+        setStatus('Enviando ao servidor para mesclar (aguarde)...');
         try {
           const mergedUrl = await uploadAndMergeToServer(vblob, ablob);
           if (mergedUrl) {
-            // show result pointing to merged mp4
+            // show merged mp4
+            videoPreview.src = mergedUrl; videoPreview.style.display = 'block'; videoPreview.muted = false; videoPreview.controls = true;
             currentBlob = await fetch(mergedUrl).then(r => r.blob());
             currentFileType = 'video';
             currentFileName = `video_${Date.now()}.mp4`;
             currentBlobUrl = mergedUrl;
-            downloadBtn.href = currentBlobUrl;
-            downloadBtn.download = currentFileName;
-            downloadBtn.innerText = `✅ Salvo! Clique para Visualizar`;
+            downloadBtn.href = currentBlobUrl; downloadBtn.download = currentFileName; downloadBtn.innerText = '✅ Salvo! Clique para Visualizar';
             setStatus('MP4 mesclado pronto.');
-            // set preview
-            videoPreview.src = currentBlobUrl;
-            videoPreview.style.display = 'block';
-            videoPreview.muted = false;
-            videoPreview.controls = true;
-            try { videoPreview.play().catch(()=>{}); } catch(e){}
             return;
           }
         } catch (e) {
           console.error('uploadAndMergeToServer failed', e);
+          // fallback to providing separate files
         }
       }
 
-      // Otherwise, offer separate downloads (video + audio)
+      // provide separate files to download
       provideSeparateFiles(vblob, ablob);
-      setStatus('Gravado (arquivos separados). Faça merge no servidor/desktop se quiser MP4.');
+      setStatus('Arquivos separados prontos (video + audio).');
     }
 
     function provideSeparateFiles(vblob, ablob) {
       const vurl = URL.createObjectURL(vblob);
-      const aurl = URL.createObjectURL(ablob);
+      const aurl = ablob ? URL.createObjectURL(ablob) : null;
 
-      // Video link
       downloadBtn.href = vurl;
       downloadBtn.download = `video_${Date.now()}.webm`;
       downloadBtn.innerText = '⬇️ Baixar vídeo (webm)';
       downloadBtn.classList.remove('hidden');
-      // create audio link
-      let existing = document.getElementById('audioLink');
-      if (existing) existing.remove();
-      const aLink = document.createElement('a');
-      aLink.id = 'audioLink';
-      aLink.href = aurl;
-      aLink.download = `audio_${Date.now()}.webm`;
-      aLink.textContent = '⬇️ Baixar áudio (webm)';
-      aLink.className = 'action-btn btn-new';
-      aLink.style.marginTop = '8px';
-      downloadBtn.parentNode.appendChild(aLink);
+
+      let old = document.getElementById('audioLink');
+      if (old) old.remove();
+      if (aurl) {
+        const aLink = document.createElement('a');
+        aLink.id = 'audioLink';
+        aLink.href = aurl;
+        aLink.download = `audio_${Date.now()}.webm`;
+        aLink.textContent = '⬇️ Baixar áudio (webm)';
+        aLink.className = 'action-btn btn-new';
+        aLink.style.marginTop = '8px';
+        downloadBtn.parentNode.appendChild(aLink);
+      }
     }
 
     function stopEverythingAfterError() {
@@ -517,7 +485,7 @@
       alert('Erro ao iniciar gravação neste navegador. Veja console para detalhes.');
     }
 
-    // --- Upload merge to server (client) ---
+    // upload to server merge (client)
     async function uploadAndMergeToServer(vblob, ablob) {
       try {
         const form = new FormData();
@@ -528,8 +496,6 @@
         if (!resp.ok) throw new Error('Servidor retornou erro: ' + resp.status);
         const resBlob = await resp.blob();
         const url = URL.createObjectURL(resBlob);
-
-        // place as download link
         return url;
       } catch (e) {
         console.error('uploadAndMergeToServer error', e);
@@ -538,68 +504,125 @@
     }
 
     // --- Result handling & download ---
-    function showResult(type, blob = null) {
-      video.style.display = 'none';
-      molduraPreview.style.display = 'none';
-      cameraUI.style.display = 'none';
-      resultUI.style.display = 'flex';
-      document.getElementById('postCaptureActions').style.display = 'flex';
+    function showResult(type, blob = null, externalUrl = null) {
+      video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
+      resultUI.style.display = 'flex'; document.getElementById('postCaptureActions').style.display = 'flex';
 
       const timestamp = Date.now();
 
+      // revoke previously used preview URL only when resetting
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(currentBlobUrl);
+          // don't revoke here immediately
       }
-      currentBlobUrl = null;
 
       currentBlob = blob;
       currentFileType = type;
 
       if (type === 'image') {
-          canvasPreview.style.display = 'block';
-          videoPreview.style.display = 'none';
+          canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
           currentFileName = `foto_${timestamp}.png`;
+          currentBlobUrl = externalUrl || URL.createObjectURL(blob);
       } else {
-          canvasPreview.style.display = 'none';
-          videoPreview.style.display = 'block';
+          canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
           const ext = finalFileExtension || 'webm';
           currentFileName = `video_${timestamp}.${ext}`;
-          currentBlobUrl = videoPreview.src || URL.createObjectURL(blob);
+          currentBlobUrl = externalUrl || URL.createObjectURL(blob);
+          // set preview src if not already set
+          if (!videoPreview.src || videoPreview.src === '') videoPreview.src = currentBlobUrl;
       }
 
-      // download (attempt save to gallery)
-      const tempUrl = URL.createObjectURL(blob);
-      const tempLink = document.createElement('a');
-      tempLink.style.display = 'none';
-      tempLink.href = tempUrl;
-      tempLink.download = currentFileName;
-      document.body.appendChild(tempLink);
-      tempLink.click();
-      document.body.removeChild(tempLink);
-      URL.revokeObjectURL(tempUrl);
+      // Start download (attempt to save to gallery). On Android this should trigger download.
+      try {
+        const tempUrl = currentBlobUrl;
+        const tempLink = document.createElement('a');
+        tempLink.style.display = 'none';
+        tempLink.href = tempUrl;
+        tempLink.download = currentFileName;
+        document.body.appendChild(tempLink);
+        tempLink.click();
+        document.body.removeChild(tempLink);
+      } catch (e) {
+        console.warn('Download automático falhou, usuário pode clicar em Baixar.', e);
+      }
 
+      // Update download button to preview file (do NOT revoke immediately)
       downloadBtn.href = currentBlobUrl || '#';
       downloadBtn.download = currentFileName;
       downloadBtn.innerText = `✅ Salvo! Clique para Visualizar`;
-      setStatus('Arquivo processado e salvo (download iniciado).');
+      setStatus('Arquivo processado. Toque em "Baixar / Salvar" para ver o arquivo.');
     }
 
     function resetCamera() {
+      // revoke previous blob URLs (cleanup)
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(currentBlobUrl);
+          try { URL.revokeObjectURL(currentBlobUrl); } catch(e){}
       }
       currentBlobUrl = null;
       currentBlob = null;
       currentFileName = null;
 
-      downloadBtn.href = '#';
-      downloadBtn.download = '';
-      downloadBtn.innerText = `📥 Baixar / Salvar`;
-
       // remove possible extra audio link
       const oldAudio = document.getElementById('audioLink');
       if (oldAudio) oldAudio.remove();
 
+      downloadBtn.href = '#';
+      downloadBtn.download = '';
+      downloadBtn.innerText = `📥 Baixar / Salvar`;
+
       canvasPreview.style.display = 'none';
       videoPreview.style.display = 'none';
-      try { videoPreview
+      try { videoPreview.pause(); } catch(e){}
+      video.style.display = 'block';
+      molduraPreview.style.display = 'block';
+      resultUI.style.display = 'none';
+      cameraUI.style.display = 'flex';
+      errorMsg.innerText = "";
+      setStatus('Pronto');
+    }
+
+    // --- Draw + utils ---
+    function updateTimer() {
+        const diff = Math.floor((Date.now() - recordingStartTime) / 1000);
+        const m = Math.floor(diff / 60).toString().padStart(2,'0');
+        const s = (diff % 60).toString().padStart(2,'0');
+        recordingTimer.innerText = `${m}:${s}`;
+    }
+
+    function drawVideoToCanvas(ctx, w, h) {
+      const vw = video.videoWidth; const vh = video.videoHeight;
+      if(!vw || !vh) return;
+      const vidRatio = vw / vh; const canvasRatio = w / h;
+      let dw, dh, dx, dy;
+      if (vidRatio > canvasRatio) { dh = h; dw = h * vidRatio; dx = (w - dw) / 2; dy = 0; } 
+      else { dw = w; dh = w / vidRatio; dx = 0; dy = (h - dh) / 2; }
+
+      if (usingFrontCamera) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -dx - dw, dy, dw, dh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, dx, dy, dw, dh);
+      }
+    }
+
+    function drawImageLayer(ctx, url, w, h) {
+      return new Promise(r => {
+        const img = new Image(); img.crossOrigin = "anonymous";
+        img.onload = () => { ctx.drawImage(img, 0, 0, w, h); r(); };
+        img.onerror = () => r();
+        img.src = url;
+      });
+    }
+
+    function flashEffect() {
+        const f = document.getElementById('flash');
+        f.style.opacity = '1'; setTimeout(() => f.style.opacity = '0', 150);
+    }
+
+    // initialize UI state
+    setMoldura(document.getElementById('m1Btn'), 'm1');
+    setStatus('Aguardando');
+  </script>
+</body>
+</html>
