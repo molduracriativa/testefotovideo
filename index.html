@@ -137,7 +137,7 @@
 
       <div class="ui-layer" id="resultUI" style="display: none; justify-content: flex-end; align-items: center;">
         <div id="postCaptureActions">
-          <a id="downloadBtn" class="action-btn btn-save">📥 Baixar / Salvar</a>
+          <a id="downloadBtn" class="action-btn btn-save" href="#">📥 Baixar / Salvar</a>
           <button id="shareManualBtn" class="action-btn btn-new">📱 Compartilhar no WhatsApp</button>
         </div>
       </div>
@@ -270,6 +270,7 @@
       if(btn) btn.classList.add('active');
       currentMolduraUrl = MOLDURAS[key];
       molduraPreview.src = currentMolduraUrl;
+      molduraPreview.style.display = 'block';
     }
 
     async function initCamera(tryAudio = true) {
@@ -329,7 +330,7 @@
       if (isRecording) stopRecording(); 
       usingFrontCamera = !usingFrontCamera;
       
-      await new Promise(resolve => setTimeout(resolve, 1000)); 
+      await new Promise(resolve => setTimeout(resolve, 500)); 
       
       await initCamera(true);
     }
@@ -381,11 +382,11 @@
         }
 
         const preferredMimeTypes = [
-            'video/mp4;codecs=avc1.42001E', 
-            'video/mp4',                   
-            'video/webm;codecs=vp9',       
-            'video/webm;codecs=vp8',       
-            'video/webm'                   
+            'video/mp4;codecs=avc1.42E01E', // nota: escrita can vary por dispositivos
+            'video/mp4',
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
         ];
         
         let options = {};
@@ -421,7 +422,7 @@
             return;
         }
 
-        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
         mediaRecorder.onstop = finishVideo;
         mediaRecorder.start();
     }
@@ -436,55 +437,94 @@
     }
 
     function finishVideo() {
-      const simpleMimeType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
-      const blob = new Blob(recordedChunks, { type: simpleMimeType }); 
-      
-      const videoURL = URL.createObjectURL(blob);
-      videoPreview.src = videoURL;
-      showResult('video', blob);
+      // Usa o MIME completo que foi selecionado ao criar o MediaRecorder
+      const mimeToUse = finalMimeType || 'video/webm';
+      const blob = new Blob(recordedChunks, { type: mimeToUse });
+
+      // cria URL de preview (esta mesma URL será usada para download)
+      const previewUrl = URL.createObjectURL(blob);
+      videoPreview.src = previewUrl;
+      videoPreview.style.display = 'block';
+      videoPreview.controls = true;
+      videoPreview.play().catch(()=>{/* autoplay pode ser bloqueado — não crítico */});
+
+      showResult('video', blob, previewUrl);
     }
 
     // --- Lógica de Resultado e Download ---
 
-    function showResult(type, blob = null) {
+    /**
+     * showResult(type, blob, previewUrlOptional)
+     * - type: 'image' | 'video'
+     * - blob: Blob com o conteúdo final
+     * - previewUrlOptional: se já criou a URL (recomendado para vídeo), passe-a para evitar criar várias URLs
+     */
+    function showResult(type, blob = null, previewUrlOptional = null) {
+      // Esconde interface de gravação
       video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
       resultUI.style.display = 'flex'; document.getElementById('postCaptureActions').style.display = 'flex';
       
       const timestamp = Date.now(); 
 
-      // 1. REVOGA A URL ANTERIORMENTE ATIVA para liberar a memória e cache
+      // REVOGA A URL ANTERIORMENTE ATIVA para liberar memória (se houver)
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(currentBlobUrl); 
+          try { URL.revokeObjectURL(currentBlobUrl); } catch(e){/*ignore*/ }
       }
       currentBlobUrl = null;
 
-      // 2. Armazena o Blob, Tipo e Nome de Arquivo
+      // Armazena o Blob, Tipo e Nome de Arquivo
       currentBlob = blob;
       currentFileType = type;
 
       if (type === 'image') {
+          // Imagem: criamos preview e link de download
           canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
           currentFileName = `foto_${timestamp}.png`;
+
+          const previewUrl = previewUrlOptional || URL.createObjectURL(blob);
+          currentBlobUrl = previewUrl;
+
+          // mostra no canvasPreview (ajusta escala)
+          const img = new Image();
+          img.onload = () => {
+            canvasPreview.width = stage.clientWidth;
+            canvasPreview.height = stage.clientHeight;
+            const ctx = canvasPreview.getContext('2d');
+            ctx.clearRect(0,0,canvasPreview.width, canvasPreview.height);
+            ctx.drawImage(img, 0, 0, canvasPreview.width, canvasPreview.height);
+          };
+          img.src = previewUrl;
+
       } else {
+          // Vídeo: usa a URL já criada
           canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
           const ext = finalFileExtension || 'webm'; 
           currentFileName = `video_${timestamp}.${ext}`;
-          currentBlobUrl = videoPreview.src; // URL de preview
+
+          // previewUrlOptional já foi definido em finishVideo()
+          const previewUrl = previewUrlOptional || URL.createObjectURL(blob);
+          currentBlobUrl = previewUrl;
+
+          // atribui ao videoPreview (se ainda não atribuído)
+          if (!videoPreview.src || videoPreview.src !== previewUrl) {
+              videoPreview.src = previewUrl;
+          }
       }
       
-      // 3. CRÍTICO: Executa o download imediatamente após a criação do blob (Salva na Galeria)
-      const tempUrl = URL.createObjectURL(blob);
-      const tempLink = document.createElement('a');
-      tempLink.style.display = 'none';
-      tempLink.href = tempUrl;
-      tempLink.download = currentFileName;
-      
-      document.body.appendChild(tempLink);
-      tempLink.click();
-      document.body.removeChild(tempLink);
-      URL.revokeObjectURL(tempUrl); 
-      
-      // 4. Atualiza o botão DownloadBtn
+      // Faz download automático usando a mesma URL de preview (não revoga a URL aqui)
+      try {
+        const tempLink = document.createElement('a');
+        tempLink.style.display = 'none';
+        tempLink.href = currentBlobUrl;
+        tempLink.download = currentFileName;
+        document.body.appendChild(tempLink);
+        tempLink.click();
+        document.body.removeChild(tempLink);
+      } catch (e) {
+        console.warn('Falha no download automático:', e);
+      }
+
+      // Atualiza botão de download para o usuário (usa currentBlobUrl)
       downloadBtn.href = currentBlobUrl || '#'; 
       downloadBtn.download = currentFileName; 
       downloadBtn.innerText = `✅ Salvo! Clique para Visualizar`;
@@ -493,7 +533,7 @@
 
     function resetCamera() {
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(currentBlobUrl);
+          try { URL.revokeObjectURL(currentBlobUrl); } catch(e){/*ignore*/ }
       }
       currentBlobUrl = null;
       currentBlob = null;
