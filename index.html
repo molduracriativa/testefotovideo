@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V5 - Final</title>
+  <title>Crispoparte V5 - Final Estável</title>
   <style>
     :root {
       --accent: #25D366;
@@ -469,9 +469,9 @@
         
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
             navigator.share({ files: [file], title: 'Crispoparte' }).catch(e => {
-                console.error("Erro no compartilhamento:", e);
-                // Se o compartilhamento falhar, cai para o download como backup
-                alert("Falha ao compartilhar. Iniciando o download...");
+                console.error("Erro no compartilhamento nativo:", e);
+                // INFORMAÇÃO MELHORADA: Se o compartilhamento nativo falhar, alerta o usuário
+                alert("Falha no compartilhamento nativo (limitação do aparelho/SO). Iniciando o download...");
                 document.getElementById('downloadBtn').click();
             });
         } else {
