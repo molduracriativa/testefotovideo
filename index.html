@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V8 - Final</title>
+  <title>Crispoparte V9 - Final Absoluto</title>
   <style>
     :root {
       --accent: #25D366;
@@ -92,7 +92,11 @@
 
     #postCaptureActions { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; pointer-events: auto; }
     
-    .action-btn { width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 16px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none; display: inline-block; }
+    .action-btn { 
+        width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 16px; font-weight: bold; 
+        cursor: pointer; text-align: center; text-decoration: none; display: inline-block; 
+        /* CRÍTICO: Removendo o HREF aqui para evitar cache inicial */
+        }
     .btn-save { background: var(--accent); color: #fff; }
     .btn-new { background: #555; color: #fff; }
     .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 10; transition: opacity 0.1s; }
@@ -165,10 +169,9 @@
     
     let finalMimeType = null;
     let finalFileExtension = null;
-    let currentBlobUrl = null; 
     
-    // VARIÁVEL CRÍTICA: Armazena o OBJETO BLOB (dados puros) e o nome do arquivo
-    let currentDownloadData = { blob: null, filename: null }; 
+    // CRÍTICO: Variável para armazenar a URL ATIVA para revogação posterior
+    let currentBlobUrl = null; 
 
     // --- DOM Elements ---
     const video = document.getElementById('camera');
@@ -205,39 +208,7 @@
         }
     });
 
-    // NOVO: Ação de download forçada pelo BLOB
-    downloadBtn.addEventListener('click', triggerDownload);
-    
-    // --- Download Programático Corrigido (Máxima Prioridade) ---
-    function triggerDownload() {
-        const { blob, filename } = currentDownloadData;
-        
-        if (!blob || !filename) {
-            alert("Erro: Arquivo não encontrado para download. Tente uma nova gravação.");
-            return;
-        }
-
-        // 1. Cria a URL do objeto APENAS NO MOMENTO DO DOWNLOAD (Evita cache)
-        const url = URL.createObjectURL(blob);
-        
-        // 2. Cria um link temporário no DOM
-        const tempLink = document.createElement('a');
-        tempLink.style.display = 'none';
-        
-        // 3. Define o HREF e o download
-        tempLink.href = url;
-        tempLink.download = filename;
-        
-        // 4. Clica e remove (Garante que o download use o Blob atual)
-        document.body.appendChild(tempLink);
-        tempLink.click();
-        document.body.removeChild(tempLink);
-        
-        // 5. Revoga a URL imediatamente após o clique para limpar a memória
-        URL.revokeObjectURL(url); 
-    }
-    
-    // --- Funções Principais de Câmera e Captura ---
+    // --- Câmera e Gravação (Mantidas) ---
     
     function setMode(mode) {
         currentMode = mode;
@@ -325,7 +296,6 @@
       canvasPreview.width = stage.clientWidth; canvasPreview.height = stage.clientHeight;
       ctxPrev.drawImage(canvasFinal, 0, 0, canvasPreview.width, canvasPreview.height);
 
-      // Converte para Blob para obter os dados para download
       canvasFinal.toBlob(blob => {
           showResult('image', blob);
       }, 'image/png');
@@ -424,7 +394,7 @@
       showResult('video', blob);
     }
 
-    // --- Helpers ---
+    // --- Lógica de Resultado e Download (CORRIGIDA) ---
 
     function showResult(type, blob = null) {
       video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
@@ -432,38 +402,40 @@
       
       const timestamp = Date.now(); 
 
-      // Limpeza de URLs e Dados antigos
+      // 1. CRÍTICO: REVOGA A URL ANTERIORMENTE ATIVA para liberar a memória e cache
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
           URL.revokeObjectURL(currentBlobUrl); 
       }
       currentBlobUrl = null;
-      currentDownloadData = { blob: null, filename: null }; 
+
+      const url = URL.createObjectURL(blob); // Cria a nova URL única
 
       if (type === 'image') {
           canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
-          
-          const url = URL.createObjectURL(blob); // URL apenas para Preview/VideoPlayer
-          currentBlobUrl = url; 
-          
-          currentDownloadData = { blob, filename: `foto_${timestamp}.png` };
+          downloadBtn.download = `foto_${timestamp}.png`;
       } else {
           canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
-          
           const ext = finalFileExtension || 'webm'; 
-          
-          // O videoPreview.src já foi definido em finishVideo() usando a URL
-          
-          currentDownloadData = { blob, filename: `video_${timestamp}.${ext}` };
+          downloadBtn.download = `video_${timestamp}.${ext}`;
       }
+      
+      // 2. CRÍTICO: Atribui a nova URL única ao HREF do botão A
+      downloadBtn.href = url;
+      
+      // 3. Armazena a nova URL para revogação futura (na próxima captura)
+      currentBlobUrl = url;
     }
 
+
     function resetCamera() {
-      // REVOGA A URL DO OBJETO QUANDO VOLTA PARA A CÂMERA
+      // REVOGA A URL ATIVA ao voltar para a câmera
       if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
           URL.revokeObjectURL(currentBlobUrl);
       }
       currentBlobUrl = null;
-      currentDownloadData = { blob: null, filename: null };
+      
+      // Limpa o link do botão de download
+      downloadBtn.href = '#';
 
       canvasPreview.style.display = 'none'; videoPreview.style.display = 'none'; videoPreview.pause();
       video.style.display = 'block'; molduraPreview.style.display = 'block';
@@ -471,7 +443,7 @@
       errorMsg.innerText = "";
     }
     
-    // --- Funções de Gravação e Desenho (Mantidas) ---
+    // --- Funções Auxiliares (Mantidas) ---
 
     function updateTimer() {
         const diff = Math.floor((Date.now() - recordingStartTime) / 1000);
