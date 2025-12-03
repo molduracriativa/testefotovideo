@@ -1,172 +1,452 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moldura - Foto & Vídeo</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: #111;
-      font-family: Arial, sans-serif;
-      color: #fff;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      height: 100vh;
-    }
-
-    h2 {
-      margin-top: 15px;
-    }
-
-    #preview-area {
-      position: relative;
-      width: 100%;
-      max-width: 420px;
-      margin-top: 10px;
-    }
-
-    video, canvas {
-      width: 100%;
-      border-radius: 16px;
-    }
-
-    .frame-buttons, .control-buttons {
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      margin-top: 12px;
-    }
-
-    button {
-      background: #1e90ff;
-      border: none;
-      padding: 12px 16px;
-      color: white;
-      border-radius: 10px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-
-    button:active { opacity: 0.7; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Crispoparte — Restaurado (Foto/Vídeo + Moldura + Áudio)</title>
+<style>
+  :root{
+    --accent:#25D366;
+    --primary:#FF5722;
+    --bg:#000;
+    --card:#111;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#fff}
+  .container{max-width:420px;margin:0 auto;padding:12px;height:100%;display:flex;flex-direction:column;gap:10px}
+  .stage{position:relative;flex:1;min-height:520px;background:#000;border-radius:12px;overflow:hidden}
+  video, canvas, img.moldura {position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  img.moldura{pointer-events:none;z-index:5}
+  #canvasPreview{display:none;z-index:4}
+  #videoPreview{display:none;z-index:4}
+  .ui{position:relative;z-index:10;display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .topbar{display:flex;justify-content:space-between;align-items:center}
+  .controls{display:flex;justify-content:space-between;gap:8px}
+  .left, .right{display:flex;gap:8px;align-items:center}
+  button, a.btn{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);color:#fff;padding:10px 12px;border-radius:12px;cursor:pointer;font-weight:600}
+  button.primary{background:var(--accent);color:#000}
+  .mode-switch{display:flex;background:rgba(255,255,255,0.04);padding:4px;border-radius:20px}
+  .mode-switch button{background:transparent;padding:8px 14px;border-radius:14px;color:#ccc;border:none}
+  .mode-switch button.active{background:#fff;color:#000}
+  .frame-selector{display:flex;gap:8px}
+  .frame-selector button{min-width:44px}
+  .status{font-size:13px;color:#ccc}
+  #recordBtn{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px}
+  #recordBtn.recording{border-color:red;background:rgba(255,0,0,0.15)}
+  footer{font-size:12px;color:#999;text-align:center;margin-top:6px}
+  .hidden{display:none!important}
+</style>
 </head>
 <body>
+  <div class="container">
+    <h3 style="margin:0 0 6px 0">Câmera Crispoparte</h3>
 
-  <h2>Moldura Personalizada</h2>
+    <div class="stage" id="stage">
+      <!-- live camera (muted so it can autoplay) -->
+      <video id="camera" autoplay playsinline muted></video>
 
-  <!-- SELEÇÃO DE MOLDURA -->
-  <div class="frame-buttons">
-    <button onclick="setFrame('moldura1.png')">Moldura 1</button>
-    <button onclick="setFrame('moldura2.png')">Moldura 2</button>
+      <!-- preview canvas (for captured photo preview if needed) -->
+      <canvas id="canvasPreview"></canvas>
+
+      <!-- video preview for recorded files -->
+      <video id="videoPreview" controls playsinline></video>
+
+      <!-- visible moldura overlay -->
+      <img id="molduraPreview" class="moldura" src="moldura1.png" alt="moldura" />
+
+      <!-- flash effect -->
+      <div id="flash" style="position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .12s;z-index:6"></div>
+    </div>
+
+    <div class="ui">
+      <div class="topbar">
+        <div class="left">
+          <button id="switchBtn" title="Trocar câmera">🔄 Trocar</button>
+          <div id="status" class="status">Aguardando</div>
+        </div>
+
+        <div class="right">
+          <div id="recordingTimer" class="status" style="display:none;background:rgba(0,0,0,0.4);padding:6px 10px;border-radius:12px">00:00</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="mode-switch" role="tablist">
+            <button id="modePhoto" class="active">FOTO</button>
+            <button id="modeVideo">VÍDEO</button>
+          </div>
+
+          <div class="frame-selector" aria-label="Molduras">
+            <button id="m1Btn" class="active">1</button>
+            <button id="m2Btn">2</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px">
+          <button id="captureBtn" title="Capturar (Foto ou Vídeo)">
+            <svg class="cam-icon" viewBox="0 0 24 24" width="28" height="28" fill="white"><path d="M12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/><path d="M20 5h-3.17L15 3H9L7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 14H4V7h16v12z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="controls">
+        <a id="downloadBtn" class="btn" href="#" download="#" style="text-decoration:none">📥 Baixar / Salvar</a>
+        <button id="shareManualBtn" class="btn">📱 Compartilhar</button>
+      </div>
+    </div>
+
+    <footer>Permita câmera e microfone ao iniciar</footer>
   </div>
 
-  <!-- CÂMERA + CANVAS -->
-  <div id="preview-area">
-    <video id="camera" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
-  </div>
+<script>
+/* === Config e Estado === */
+const MOLDURAS = { m1: 'moldura1.png', m2: 'moldura2.png' };
+let currentMolduraUrl = MOLDURAS.m1;
+let currentMolduraImg = new Image(); currentMolduraImg.crossOrigin = "anonymous"; currentMolduraImg.src = currentMolduraUrl;
 
-  <!-- BOTÕES FOTO & VÍDEO -->
-  <div class="control-buttons">
-    <button onclick="capturePhoto()">📸 Foto</button>
-    <button id="recordBtn" onclick="toggleRecording()">🎥 Vídeo</button>
-  </div>
+let usingFrontCamera = true;
+let stream = null;
+let currentMode = 'photo'; // 'photo' | 'video'
+let isRecording = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStartTime = 0;
+let animationFrameId = null;
+let canvasFinal = document.createElement('canvas'); // not in DOM
+const canvasPreview = document.getElementById('canvasPreview');
+const ctxPreview = canvasPreview.getContext('2d');
+const videoEl = document.getElementById('camera');
+const videoPreview = document.getElementById('videoPreview');
 
-  <script>
-    let stream;
-    let mediaRecorder;
-    let recordedChunks = [];
-    let recording = false;
+let currentBlob = null;
+let currentBlobUrl = null;
+let currentFileName = null;
+let finalMimeType = null;
+let finalFileExtension = null;
 
-    const camera = document.getElementById("camera");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
+/* DOM */
+const startStatus = document.getElementById('status');
+const recordingTimer = document.getElementById('recordingTimer');
+const molduraPreview = document.getElementById('molduraPreview');
+const captureBtn = document.getElementById('captureBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const shareManualBtn = document.getElementById('shareManualBtn');
 
-    let frameImg = new Image();
+/* Buttons */
+document.getElementById('switchBtn').addEventListener('click', switchCamera);
+document.getElementById('m1Btn').addEventListener('click', ()=>setMoldura('m1'));
+document.getElementById('m2Btn').addEventListener('click', ()=>setMoldura('m2'));
+document.getElementById('modePhoto').addEventListener('click', ()=>setMode('photo'));
+document.getElementById('modeVideo').addEventListener('click', ()=>setMode('video'));
+captureBtn.addEventListener('click', () => {
+  if(currentMode === 'photo') takePhoto(); else isRecording ? stopRecording() : startRecording();
+});
+downloadBtn.addEventListener('click', (e) => {
+  if(!currentBlobUrl || currentBlobUrl === '#') { e.preventDefault(); alert('Arquivo não pronto.'); }
+});
+shareManualBtn.addEventListener('click', showShareInstructions);
 
-    async function startCamera() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: true
-        });
+/* Inicializa (não chamo .init imediatamente para evitar autoplay/permissão sem clique) */
+setMoldura('m1');
+setStatus('Aguardando. Clique em "Trocar" ou permita câmera no navegador.');
 
-        camera.srcObject = stream;
+/* Funções UI */
+function setStatus(s){ startStatus.innerText = s; console.log('[status]',s); }
+function setMode(mode){
+  currentMode = mode;
+  document.getElementById('modePhoto').classList.toggle('active', mode==='photo');
+  document.getElementById('modeVideo').classList.toggle('active', mode==='video');
+  captureBtn.style.borderColor = mode === 'video' ? 'red' : 'white';
+}
+function setMoldura(key){
+  document.querySelectorAll('.frame-selector button').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(key==='m1'?'m1Btn':'m2Btn');
+  if(btn) btn.classList.add('active');
+  currentMolduraUrl = MOLDURAS[key];
+  molduraPreview.src = currentMolduraUrl;
+  currentMolduraImg = new Image();
+  currentMolduraImg.crossOrigin = "anonymous";
+  currentMolduraImg.src = currentMolduraUrl;
+}
 
-        camera.onloadedmetadata = () => {
-          canvas.width = camera.videoWidth;
-          canvas.height = camera.videoHeight;
-          draw();
-        };
-      } catch (err) {
-        alert("Erro ao acessar câmera: " + err);
+/* --- Camera init (invocado ao primeiro uso) --- */
+async function initCamera(tryAudio=true){
+  if(stream){
+    try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+    stream = null;
+  }
+  setStatus('Solicitando permissões...');
+  const facing = usingFrontCamera ? 'user' : 'environment';
+  const constraints = { video: { facingMode: facing }, audio: tryAudio };
+  try{
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  }catch(err){
+    console.warn('getUserMedia error', err);
+    if(tryAudio){ setStatus('Permissões negadas ou erro de áudio. Tentando sem microfone...'); return initCamera(false); }
+    setStatus('Falha ao acessar câmera'); alert('Erro ao acessar câmera/microfone: ' + (err && err.message ? err.message : err));
+    return;
+  }
+
+  videoEl.srcObject = stream;
+  if(usingFrontCamera) videoEl.classList.add('mirrored'); else videoEl.classList.remove('mirrored');
+  videoEl.onloadedmetadata = ()=>{ videoEl.play().catch(()=>{}); setStatus('Pronto'); prepareCanvasForCapture(); showUI(); };
+}
+
+/* Exibe UI (garantir que botões fiquem visíveis) */
+function showUI(){
+  document.getElementById('camera').style.display = 'block';
+  document.querySelector('.ui').style.display = 'flex';
+}
+
+/* Prepara canvasFinal para 1080x1920 */
+function prepareCanvasForCapture(){
+  canvasFinal.width = 1080;
+  canvasFinal.height = 1920;
+  canvasPreview.width = document.getElementById('stage').clientWidth || 360;
+  canvasPreview.height = document.getElementById('stage').clientHeight || 640;
+}
+
+/* Trocar câmera */
+async function switchCamera(){
+  usingFrontCamera = !usingFrontCamera;
+  setStatus('Trocando câmera...');
+  await new Promise(r=>setTimeout(r, 300));
+  await initCamera(true);
+}
+
+/* Desenhar frame do vídeo no canvas final (usado p/ foto e p/ frame do vídeo) */
+function drawVideoToCanvas(ctx, w, h){
+  const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
+  if(!vw || !vh) return;
+  const vidRatio = vw / vh, canvasRatio = w / h;
+  let dw, dh, dx, dy;
+  if(vidRatio > canvasRatio){ dh = h; dw = h * vidRatio; dx = (w - dw)/2; dy = 0; }
+  else { dw = w; dh = w / vidRatio; dx = 0; dy = (h - dh)/2; }
+
+  if(usingFrontCamera){
+    ctx.save();
+    ctx.scale(-1,1);
+    ctx.drawImage(videoEl, -dx - dw, dy, dw, dh);
+    ctx.restore();
+  } else {
+    ctx.drawImage(videoEl, dx, dy, dw, dh);
+  }
+}
+
+/* ----- Foto ----- */
+function takePhoto(){
+  // ensure camera started
+  if(!stream) { initCamera(true); return; }
+
+  flashEffect();
+  canvasFinal.width = 1080; canvasFinal.height = 1920;
+  const ctx = canvasFinal.getContext('2d');
+  drawVideoToCanvas(ctx, 1080, 1920);
+  // draw moldura
+  if(currentMolduraImg && currentMolduraImg.complete) ctx.drawImage(currentMolduraImg, 0, 0, 1080, 1920);
+
+  // preview small canvas for UI
+  canvasPreview.width = document.getElementById('stage').clientWidth;
+  canvasPreview.height = document.getElementById('stage').clientHeight;
+  ctxPreview.clearRect(0,0,canvasPreview.width,canvasPreview.height);
+  ctxPreview.drawImage(canvasFinal, 0, 0, canvasPreview.width, canvasPreview.height);
+  canvasPreview.style.display = 'block';
+  videoPreview.style.display = 'none';
+
+  // blob and download
+  canvasFinal.toBlob(blob => {
+    showResult('image', blob);
+  }, 'image/png');
+}
+
+/* ----- Vídeo: record com áudio + canvas (moldura desenhada) ----- */
+function startRecording(){
+  if(!stream) { initCamera(true); return; }
+
+  isRecording = true;
+  captureBtn.classList.add('recording');
+  recordingTimer.style.display = 'block';
+  recordingStartTime = Date.now();
+  recordedChunks = [];
+  finalMimeType = null; finalFileExtension = null;
+
+  // ensure canvas size unified
+  canvasFinal.width = 1080; canvasFinal.height = 1920;
+  const ctx = canvasFinal.getContext('2d');
+
+  // draw loop
+  const loop = () => {
+    if(!isRecording) return;
+    drawVideoToCanvas(ctx, 1080, 1920);
+    if(currentMolduraImg && currentMolduraImg.complete) ctx.drawImage(currentMolduraImg, 0,0,1080,1920);
+    updateTimer();
+    animationFrameId = requestAnimationFrame(loop);
+  };
+  loop();
+
+  // capture canvas stream
+  const canvasStream = canvasFinal.captureStream(30);
+
+  // attach audio tracks
+  const audioTracks = stream ? stream.getAudioTracks() : [];
+  if(audioTracks && audioTracks.length){
+    audioTracks.forEach(track => {
+      try { canvasStream.addTrack(track.clone ? track.clone() : track); } catch(e){
+        try{ canvasStream.addTrack(track); }catch(_){ console.warn('unable to add audio track',_); }
       }
-    }
+    });
+  }
 
-    function setFrame(src) {
-      frameImg.src = src;
-    }
+  // pick mime
+  const preferred = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ];
+  let chosen = '';
+  for(const m of preferred){ try{ if(m && MediaRecorder.isTypeSupported(m)){ chosen = m; break; } }catch(e){} }
+  finalMimeType = chosen || 'video/webm';
+  finalFileExtension = finalMimeType.includes('mp4') ? 'mp4' : 'webm';
 
-    function draw() {
-      requestAnimationFrame(draw);
-      ctx.drawImage(camera, 0, 0, canvas.width, canvas.height);
-      if (frameImg.src) ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
-    }
+  try {
+    mediaRecorder = finalMimeType ? new MediaRecorder(canvasStream, { mimeType: finalMimeType }) : new MediaRecorder(canvasStream);
+  } catch(e){
+    alert('Não foi possível iniciar gravador: ' + e.message);
+    isRecording = false;
+    captureBtn.classList.remove('recording');
+    recordingTimer.style.display = 'none';
+    return;
+  }
 
-    function capturePhoto() {
-      const link = document.createElement("a");
-      link.download = "foto.png";
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-    }
+  mediaRecorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = finishVideo;
+  mediaRecorder.start();
+  setStatus('Gravando...');
+}
 
-    function toggleRecording() {
-      if (!recording) startRecording();
-      else stopRecording();
-    }
+/* Stop recording */
+function stopRecording(){
+  if(!isRecording) return;
+  isRecording = false;
+  captureBtn.classList.remove('recording');
+  recordingTimer.style.display = 'none';
+  recordingTimer.innerText = '00:00';
+  if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  if(animationFrameId) cancelAnimationFrame(animationFrameId);
+}
 
-    function startRecording() {
-      recordedChunks = [];
+/* finish video */
+function finishVideo(){
+  const simpleMime = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
+  const blob = new Blob(recordedChunks, { type: simpleMime });
+  if(!blob || blob.size < 1000){ alert('Erro: arquivo inválido. Tente novamente.'); resetCamera(); return; }
+  const url = URL.createObjectURL(blob);
+  videoPreview.src = url; videoPreview.style.display = 'block';
+  canvasPreview.style.display = 'none';
+  showResult('video', blob, url);
+}
 
-      const canvasStream = canvas.captureStream(30);
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) canvasStream.addTrack(audioTrack);
+/* show result + download logic */
+function showResult(type, blob, externalUrl){
+  // hide live
+  videoEl.style.display = 'none';
+  molduraPreview.style.display = 'none';
+  setStatus('Processado');
+  document.querySelector('.ui').style.display = 'flex';
+  document.getElementById('postCaptureActions')?.style?.display = 'flex';
 
-      mediaRecorder = new MediaRecorder(canvasStream, { mimeType: "video/webm" });
+  const timestamp = Date.now();
 
-      mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
-      mediaRecorder.onstop = saveVideo;
+  // revoke previous only on reset
+  // store
+  currentBlob = blob;
+  currentFileName = type === 'image' ? `foto_${timestamp}.png` : `video_${timestamp}.${finalFileExtension || 'webm'}`;
+  currentBlobUrl = externalUrl || URL.createObjectURL(blob);
 
-      mediaRecorder.start();
-      recording = true;
-      document.getElementById("recordBtn").innerText = "⏹ Parar";
-    }
+  // try automatic download (some Android block this)
+  try {
+    const tempLink = document.createElement('a');
+    tempLink.style.display = 'none';
+    tempLink.href = currentBlobUrl;
+    tempLink.download = currentFileName;
+    document.body.appendChild(tempLink);
+    tempLink.click();
+    document.body.removeChild(tempLink);
+  } catch(e){
+    console.warn('auto-download failed', e);
+  }
 
-    function stopRecording() {
-      mediaRecorder.stop();
-      recording = false;
-      document.getElementById("recordBtn").innerText = "🎥 Vídeo";
-    }
+  // setup manual download button (always available)
+  downloadBtn.href = currentBlobUrl;
+  downloadBtn.download = currentFileName;
+  downloadBtn.innerText = '📥 Baixar / Salvar';
 
-    function saveVideo() {
-      const blob = new Blob(recordedChunks, { type: "video/webm" });
-      const url = URL.createObjectURL(blob);
+  // show preview in videoPreview if video
+  if(type === 'image'){
+    canvasPreview.style.display = 'block';
+    videoPreview.style.display = 'none';
+  } else {
+    videoPreview.style.display = 'block';
+    canvasPreview.style.display = 'none';
+  }
+}
 
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "video.webm";
-      a.click();
+/* reset camera/UI */
+function resetCamera(){
+  try{ if(currentBlobUrl && currentBlobUrl.startsWith('blob:')) URL.revokeObjectURL(currentBlobUrl); }catch(e){}
+  currentBlobUrl = null;
+  currentBlob = null;
+  currentFileName = null;
+  downloadBtn.href = '#';
+  downloadBtn.download = '';
+  downloadBtn.innerText = '📥 Baixar / Salvar';
+  videoPreview.pause(); videoPreview.src = '';
+  videoEl.style.display = 'block';
+  molduraPreview.style.display = 'block';
+  canvasPreview.style.display = 'none';
+  setStatus('Pronto');
+}
 
-      URL.revokeObjectURL(url);
-    }
+/* share instructions (manual) */
+function showShareInstructions(){
+  if(!currentFileName){ alert('Nenhum arquivo pronto para compartilhar.'); return; }
+  alert(`Arquivo salvo como "${currentFileName}". Abra seu app de redes sociais e anexe o arquivo da pasta Downloads/Arquivos.`);
+  resetCamera();
+}
 
-    setFrame("moldura1.png");
-    startCamera();
-  </script>
+/* flash effect */
+function flashEffect(){ const f = document.getElementById('flash'); f.style.opacity = '1'; setTimeout(()=>f.style.opacity = '0',160); }
 
+/* update timer */
+function updateTimer(){
+  const diff = Math.floor((Date.now() - recordingStartTime)/1000);
+  const m = String(Math.floor(diff/60)).padStart(2,'0');
+  const s = String(diff%60).padStart(2,'0');
+  recordingTimer.innerText = `${m}:${s}`;
+}
+
+/* reset on fatal error */
+function resetCameraAndUI(){
+  try{ if(stream) stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  stream = null;
+  videoEl.srcObject = null;
+  setStatus('Aguardando permissão');
+}
+
+/* If user interacts (first click), ensure camera is started */
+document.addEventListener('click', function onFirstClick(){
+  // Start camera lazily on first user interaction to satisfy autoplay/permission policies
+  if(!stream){
+    initCamera(true);
+  }
+  document.removeEventListener('click', onFirstClick);
+});
+
+/* initial hide of preview elements */
+canvasPreview.style.display = 'none';
+videoPreview.style.display = 'none';
+recordingTimer.style.display = 'none';
+</script>
 </body>
 </html>
