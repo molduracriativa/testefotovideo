@@ -255,7 +255,7 @@
         };
     }
 
-    // --- CORREÇÃO DE NOTREADABLEERROR APLICADA AQUI ---
+    // *** FIX: Atraso de 300ms para o erro NotReadableError ***
     async function switchCamera() {
       // 1. Impede gravações ativas antes de trocar
       if (isRecording) stopRecording(); 
@@ -274,7 +274,7 @@
     async function takePhoto() {
       flashEffect();
       canvasFinal.width = 1080; canvasFinal.height = 1920;
-      drawVideoToCanvas(ctxFinal, 1080, 1920);
+      drawVideoToCanvas(ctxFinal, 1080, 1920, true); // True para foto (sem espelhamento no desenho)
       await drawImageLayer(ctxFinal, currentMolduraUrl, 1080, 1920);
       
       const ctxPrev = canvasPreview.getContext('2d');
@@ -284,52 +284,76 @@
       showResult('image');
     }
 
-    // --- VÍDEO ---
+    // --- VÍDEO (Com Codec Otimizado) ---
     function startRecording() {
-      isRecording = true;
-      captureBtn.classList.add('recording');
-      recordingTimer.style.display = 'block';
-      recordingStartTime = Date.now();
-      recordedChunks = [];
-      
-      canvasFinal.width = 720; canvasFinal.height = 1280;
-
-      const loop = () => {
-        if (!isRecording) return;
-        drawVideoToCanvas(ctxFinal, 720, 1280);
-        // Desenha moldura (cacheada pelo navegador)
-        const img = new Image(); img.src = currentMolduraUrl;
-        if(img.complete) ctxFinal.drawImage(img, 0, 0, 720, 1280);
+        isRecording = true;
+        captureBtn.classList.add('recording');
+        recordingTimer.style.display = 'block';
+        recordingStartTime = Date.now();
+        recordedChunks = [];
         
-        updateTimer();
-        animationFrameId = requestAnimationFrame(loop);
-      };
-      loop();
+        canvasFinal.width = 720; canvasFinal.height = 1280;
 
-      const canvasStream = canvasFinal.captureStream(30);
-      
-      // Tenta adicionar áudio se existir
-      if (stream.getAudioTracks().length > 0) {
-          canvasStream.addTrack(stream.getAudioTracks()[0]);
-      }
+        const loop = () => {
+            if (!isRecording) return;
+            drawVideoToCanvas(ctxFinal, 720, 1280); // Desenha no canvas
+            
+            // Desenha moldura (cacheada pelo navegador)
+            const img = new Image(); img.src = currentMolduraUrl;
+            if(img.complete) ctxFinal.drawImage(img, 0, 0, 720, 1280);
+            
+            updateTimer();
+            animationFrameId = requestAnimationFrame(loop);
+        };
+        loop();
 
-      // Tenta suportar MP4 (iPhone) ou WebM (Android)
-      let options = { mimeType: 'video/webm;codecs=vp9' };
-      if (MediaRecorder.isTypeSupported('video/mp4')) {
-          options = { mimeType: 'video/mp4' };
-      } else if (MediaRecorder.isTypeSupported('video/webm')) {
-          options = { mimeType: 'video/webm' };
-      }
+        const canvasStream = canvasFinal.captureStream(30);
+        
+        // Tenta adicionar áudio se existir
+        if (stream.getAudioTracks().length > 0) {
+            canvasStream.addTrack(stream.getAudioTracks()[0]);
+        }
 
-      try {
-        mediaRecorder = new MediaRecorder(canvasStream, options);
-      } catch(e) {
-        mediaRecorder = new MediaRecorder(canvasStream); // Tenta default
-      }
+        // --- SELEÇÃO DE CODEC APRIMORADA ---
+        const preferredMimeTypes = [
+            'video/mp4',                   // Preferência iOS/H.264
+            'video/webm;codecs=vp9',       // Melhor qualidade WebM
+            'video/webm;codecs=vp8',       // WebM amplamente suportado
+            'video/webm'                   // WebM genérico
+        ];
+        
+        let options = {};
+        let selectedMimeType = null;
 
-      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-      mediaRecorder.onstop = finishVideo;
-      mediaRecorder.start();
+        for (const mimeType of preferredMimeTypes) {
+            if (MediaRecorder.isTypeSupported(mimeType)) {
+                selectedMimeType = mimeType;
+                options = { mimeType: mimeType };
+                break;
+            }
+        }
+
+        if (!selectedMimeType) {
+            alert("ERRO DE VÍDEO: O dispositivo não suporta nenhum formato de gravação de vídeo conhecido.");
+            isRecording = false;
+            captureBtn.classList.remove('recording');
+            recordingTimer.style.display = 'none';
+            return; // Sai da função
+        }
+
+        try {
+            mediaRecorder = new MediaRecorder(canvasStream, options);
+        } catch(e) {
+            alert("ERRO CRÍTICO NA GRAVAÇÃO: Não foi possível iniciar o MediaRecorder. Motivo: " + e.message);
+            isRecording = false;
+            captureBtn.classList.remove('recording');
+            recordingTimer.style.display = 'none';
+            return;
+        }
+
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = finishVideo;
+        mediaRecorder.start();
     }
 
     function stopRecording() {
@@ -364,9 +388,11 @@
       if (vidRatio > canvasRatio) { dh = h; dw = h * vidRatio; dx = (w - dw) / 2; dy = 0; } 
       else { dw = w; dh = w / vidRatio; dx = 0; dy = (h - dh) / 2; }
       
-      // Aplicar espelhamento na gravação se a câmera frontal estiver ativa
+      // Aplicar espelhamento na gravação (se for a câmera frontal)
       if (usingFrontCamera) {
         ctx.save();
+        // A imagem da câmera frontal é espelhada visualmente, então desenhamos ela
+        // espelhada de volta para que a gravação não fique invertida.
         ctx.scale(-1, 1);
         ctx.drawImage(video, -dx - dw, dy, dw, dh);
         ctx.restore();
@@ -402,7 +428,9 @@
           sBtn.onclick = () => shareFile(url, 'foto.png', 'image/png');
       } else {
           canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
-          const ext = mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
+          // Se o Blob existir, usa o tipo dele para a extensão
+          const mime = mediaRecorder ? mediaRecorder.mimeType : (blob ? blob.type : 'video/webm');
+          const ext = mime.includes('mp4') ? 'mp4' : 'webm';
           const url = URL.createObjectURL(blob);
           dBtn.href = url; dBtn.download = `video.${ext}`;
           sBtn.onclick = () => shareFile(blob, `video.${ext}`, blob.type);
