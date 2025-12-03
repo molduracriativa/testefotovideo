@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V5 - Robusto</title>
+  <title>Crispoparte V5 - Final</title>
   <style>
     :root {
       --accent: #25D366;
@@ -216,7 +216,7 @@
       molduraPreview.src = currentMolduraUrl;
     }
 
-    // --- Câmera (Máxima Robustez: Restrições em Camadas) ---
+    // --- Câmera (Máxima Robustez: Restrições em Camadas e Áudio Corrigido) ---
     async function initCamera(tryAudio = true) {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
@@ -226,10 +226,7 @@
 
       const currentFacingMode = usingFrontCamera ? 'user' : 'environment';
       
-      // *** CAMADAS DE RESTRIÇÕES PARA MÁXIMA COMPATIBILIDADE ***
-      // 1. Tenta 720p (boa qualidade)
-      // 2. Tenta 480p (compatibilidade máxima)
-      // 3. Tenta sem restrição de resolução (padrão do navegador)
+      // CAMADAS DE RESTRIÇÕES PARA MÁXIMA COMPATIBILIDADE (720p > 480p > Genérico)
       const constraintsList = [
         { video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } } },
         { video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } } },
@@ -237,8 +234,12 @@
       ];
 
       for (const videoConstraints of constraintsList) {
-        let constraints = videoConstraints;
-        if (tryAudio) { constraints.audio = true; }
+        // CORREÇÃO: Cria uma cópia nova para garantir que `constraints.audio = true` não altere o array principal.
+        let constraints = { ...videoConstraints }; 
+        
+        if (tryAudio) { 
+            constraints.audio = true; 
+        }
 
         try {
           stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -252,9 +253,9 @@
       // Se todas as tentativas falharem
       if (tryAudio) {
            errorMsg.innerText = "Erro no áudio. Tentando iniciar sem microfone...";
-           await initCamera(false); // Última tentativa sem áudio
+           await initCamera(false); 
       } else {
-           const errMsg = `FALHA CRÍTICA! A câmera não pôde ser inicializada.`;
+           const errMsg = `FALHA CRÍTICA! A câmera e o áudio não puderam ser inicializados.`;
            errorMsg.innerText = errMsg;
            alert(errMsg); 
       }
@@ -329,6 +330,7 @@
             canvasStream.addTrack(stream.getAudioTracks()[0]);
         }
 
+        // Tenta formatos compatíveis em ordem decrescente (MP4 é a prioridade)
         const preferredMimeTypes = [
             'video/mp4;codecs=avc1.42001E', // Padrão H.264 seguro para iOS/Android
             'video/mp4',                   
@@ -385,7 +387,7 @@
     }
 
     function finishVideo() {
-      // Simplifica o MIME Type para aumentar a compatibilidade com o sistema de arquivos (resolve o erro de "não foi possível enviar")
+      // CORREÇÃO: Simplifica o MIME Type para aumentar a compatibilidade com o sistema de arquivos (resolve o erro de "não foi possível enviar")
       const simpleMimeType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
       const blob = new Blob(recordedChunks, { type: simpleMimeType }); 
       
