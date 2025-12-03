@@ -16,9 +16,8 @@
     button{padding:10px 12px;border-radius:10px;border:none;background:#222;color:#fff;cursor:pointer}
     button.primary{background:var(--accent);color:#000;font-weight:700}
     .status{position:absolute;top:18px;left:18px;background:#0008;padding:6px 10px;border-radius:8px;font-size:13px}
-    .progress{position:fixed;left:0;right:0;bottom:0;height:6px;background:#222}
+    .progress{position:fixed;left:0;right:0;bottom:0;height:6px;background:#222;display:none}
     .progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#4cd964)}
-    /* minimal responsive */
     @media (max-width:420px){ button{padding:8px 10px;font-size:14px} }
   </style>
 </head>
@@ -42,28 +41,26 @@
       <div class="controls">
         <button id="m1Btn" class="primary">Moldura 1</button>
         <button id="m2Btn">Moldura 2</button>
-        <a id="downloadBtn" class="" style="text-decoration:none;color:#fff;padding:10px 12px;border-radius:10px;background:#333">📥 Salvar</a>
+        <a id="downloadBtn" style="text-decoration:none;color:#fff;padding:10px 12px;border-radius:10px;background:#333">📥 Salvar</a>
       </div>
     </div>
 
   </div>
 
-  <div class="progress" style="display:none"><i></i></div>
+  <div class="progress" id="progressBar"><i></i></div>
 
   <canvas id="canvasFinal" style="display:none"></canvas>
 
 <script>
 /* ===========================
    CONFIG
-   - MERGE_SERVER: se quiser usar servidor FFmpeg (fallback), coloque URL. Senão deixe ''.
-   - Nota: ffmpeg wasm será carregado dinamicamente quando necessário.
    =========================== */
-const MERGE_SERVER = ''; // e.g. 'http://192.168.0.10:4000/merge'
-
+const MERGE_SERVER = ''; // Se quiser fallback servidor: 'http://IP:4000/merge'
 const MOLDURAS = { m1:'moldura1.png', m2:'moldura2.png' };
+
+/* STATE */
 let currentMoldura = MOLDURAS.m1;
 let currentMolduraImg = new Image(); currentMolduraImg.crossOrigin='anonymous'; currentMolduraImg.src = currentMoldura;
-
 let usingFront = true;
 let stream = null;
 let canvasFinal = document.getElementById('canvasFinal');
@@ -72,8 +69,8 @@ let camera = document.getElementById('camera');
 let videoPreview = document.getElementById('videoPreview');
 let status = document.getElementById('status');
 let timerEl = document.getElementById('timer');
-let progressBar = document.querySelector('.progress');
-let progressBarInner = document.querySelector('.progress > i');
+let progressBar = document.getElementById('progressBar');
+let progressInner = progressBar.querySelector('i');
 
 let recording = false;
 let mediaRecorder = null;
@@ -82,31 +79,34 @@ let recordingStart = 0;
 let rafId = null;
 let finalMime='video/webm';
 let finalExt='webm';
+let timerInterval = null;
 
-/* ffmpeg.wasm globals */
 let ffmpeg = null;
 let ffmpegLoaded = false;
 
-/* UI elements */
+let currentBlobUrl = null;
+let currentFileName = null;
+
+/* UI wiring */
 document.getElementById('switchBtn').addEventListener('click', switchCamera);
 document.getElementById('photoBtn').addEventListener('click', takePhoto);
 document.getElementById('recordBtn').addEventListener('click', toggleRecord);
 document.getElementById('m1Btn').addEventListener('click', ()=>setMoldura('m1'));
 document.getElementById('m2Btn').addEventListener('click', ()=>setMoldura('m2'));
-document.getElementById('downloadBtn').addEventListener('click', (e)=> {
-  if(!downloadBtn.href || downloadBtn.href === '#') { e.preventDefault(); alert('Arquivo não pronto.'); }
+document.getElementById('downloadBtn').addEventListener('click', (e)=>{
+  if(!currentBlobUrl){ e.preventDefault(); alert('Arquivo não pronto.'); }
 });
 
 /* init */
 setMoldura('m1');
-setStatus('Clique INICIAR para liberar câmera');
-initCamera(); // optional immediate request (you may prefer to call after user action)
+setStatus('Aguardando');
+initCamera(); // try immediate; user agents sometimes require user gesture
 
 /* ===== Camera init ===== */
 async function initCamera(tryAudio=true){
   if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
-  setStatus('Solicitando câmera' + (tryAudio? ' + microfone':''));
-  const constraints = { video:{ facingMode: usingFront ? 'user':'environment', width:{ideal:1080}, height:{ideal:1920} }, audio: tryAudio };
+  setStatus('Solicitando câmera' + (tryAudio ? ' + microfone':''));
+  const constraints = { video: { facingMode: usingFront ? 'user' : 'environment', width:{ideal:1080}, height:{ideal:1920} }, audio: tryAudio };
   try {
     stream = await navigator.mediaDevices.getUserMedia(constraints);
     camera.srcObject = stream;
@@ -114,7 +114,7 @@ async function initCamera(tryAudio=true){
   } catch(err){
     console.warn('getUserMedia failed', err);
     if(tryAudio) return initCamera(false);
-    setStatus('Falha ao obter câmera/mic');
+    setStatus('Falha ao obter câmera/microfone');
     alert('Não foi possível acessar câmera/microfone. Verifique permissões.');
   }
 }
@@ -128,82 +128,75 @@ function prepareCanvas(){
 function setMoldura(key){
   currentMoldura = MOLDURAS[key];
   currentMolduraImg.src = currentMoldura;
-  document.getElementById('m1Btn').classList.toggle('primary', key==='m1');
-  document.getElementById('m2Btn').classList.toggle('primary', key==='m2');
+  document.getElementById('m1Btn').classList.toggle('primary', key === 'm1');
+  document.getElementById('m2Btn').classList.toggle('primary', key === 'm2');
 }
 
-/* ===== Draw loop (unified 1080x1920) ===== */
+/* ===== Draw loop ===== */
 function drawLoop(w=1080,h=1920){
-  // draws video frame and overlay (called by recording loop)
   const vw = camera.videoWidth, vh = camera.videoHeight;
   if(!vw || !vh) return;
-  const vidRatio = vw / vh, canvasRatio = w/h;
+  const vidRatio = vw / vh, canvasRatio = w / h;
   let dw, dh, dx, dy;
-  if(vidRatio > canvasRatio){ dh = h; dw = h*vidRatio; dx = (w-dw)/2; dy=0; }
-  else { dw = w; dh = w/vidRatio; dx=0; dy=(h-dh)/2; }
+  if(vidRatio > canvasRatio){ dh = h; dw = h * vidRatio; dx = (w - dw)/2; dy = 0; }
+  else { dw = w; dh = w / vidRatio; dx = 0; dy = (h - dh)/2; }
 
   ctxFinal.clearRect(0,0,w,h);
   if(usingFront){
     ctxFinal.save();
     ctxFinal.scale(-1,1);
-    ctxFinal.drawImage(camera, -dx-dw, dy, dw, dh);
+    ctxFinal.drawImage(camera, -dx - dw, dy, dw, dh);
     ctxFinal.restore();
   } else {
     ctxFinal.drawImage(camera, dx, dy, dw, dh);
   }
-  if(currentMolduraImg && currentMolduraImg.complete) ctxFinal.drawImage(currentMolduraImg, 0,0,w,h);
+
+  if(currentMolduraImg && currentMolduraImg.complete) ctxFinal.drawImage(currentMolduraImg, 0, 0, w, h);
 }
 
 /* ===== Photo ===== */
 function takePhoto(){
   flash();
-  canvasFinal.width=1080; canvasFinal.height=1920;
+  canvasFinal.width = 1080; canvasFinal.height = 1920;
   drawLoop(1080,1920);
   canvasFinal.toBlob(blob=>{
-    if(!blob || blob.size<100) { alert('Erro ao gerar foto'); return; }
+    if(!blob || blob.size < 100) { alert('Erro ao gerar foto'); return; }
     const url = URL.createObjectURL(blob);
-    downloadBlobUrl(url, `foto_${Date.now()}.png`);
-    // show preview
+    currentBlobUrl = url;
+    currentFileName = `foto_${Date.now()}.png`;
+    setStatus('Foto pronta — toque em Salvar');
+    triggerDownload(url, currentFileName);
     showPreview('image', url);
   }, 'image/png');
 }
 
 /* ===== Recording ===== */
-function toggleRecord(){
-  if(!recording) startRecording(); else stopRecording();
-}
+function toggleRecord(){ recording ? stopRecording() : startRecording(); }
 
 function startRecording(){
   if(!stream){ alert('Câmera não iniciada'); return; }
   recording = true;
   recordedChunks = [];
-  finalMime = 'video/webm';
-  finalExt = 'webm';
   setStatus('Gravando...');
   document.getElementById('recordBtn').textContent = '⏹ Parar';
   recordingStart = Date.now();
-  // ensure canvas size unified
-  canvasFinal.width=1080; canvasFinal.height=1920;
+  canvasFinal.width = 1080; canvasFinal.height = 1920;
 
-  // start draw RAF loop
   (function loop(){ if(!recording) return; drawLoop(1080,1920); rafId = requestAnimationFrame(loop); })();
 
-  // capture canvas stream
   const canvasStream = canvasFinal.captureStream(30);
 
-  // attach mic audio tracks if available
   const audioTracks = stream ? stream.getAudioTracks() : [];
   if(audioTracks && audioTracks.length){
     try {
       audioTracks.forEach(t => {
-        try { canvasStream.addTrack(t.clone ? t.clone() : t); } catch(e){ try{ canvasStream.addTrack(t); }catch(_){}} 
+        try{ canvasStream.addTrack(t.clone ? t.clone() : t); } catch(e){ try{ canvasStream.addTrack(t); }catch(_){}} 
       });
     } catch(e){ console.warn('attach audioTracks error', e); }
   }
 
-  // pick mime
   const candidates = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
-  let chosen = candidates.find(m=>{ try{ return MediaRecorder.isTypeSupported(m);}catch(e){return false;} }) || '';
+  let chosen = candidates.find(m=>{ try{ return MediaRecorder.isTypeSupported(m); } catch(e){ return false; } }) || '';
   finalMime = chosen || 'video/webm';
   finalExt = finalMime.includes('mp4') ? 'mp4' : 'webm';
 
@@ -212,14 +205,15 @@ function startRecording(){
   } catch(err){
     console.error('MediaRecorder init failed', err);
     alert('Impossível iniciar MediaRecorder neste dispositivo.');
-    stopRecording();
+    recording = false;
+    document.getElementById('recordBtn').textContent = '🎥 Gravar';
     return;
   }
 
   mediaRecorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
   mediaRecorder.onstop = onRecordingStop;
   mediaRecorder.start(1000);
-  // timer
+
   timerInterval = setInterval(()=>{ const s=Math.floor((Date.now()-recordingStart)/1000); timerEl.textContent = `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; },500);
 }
 
@@ -227,113 +221,101 @@ function stopRecording(){
   recording=false;
   document.getElementById('recordBtn').textContent = '🎥 Gravar';
   setStatus('Parando gravação...');
-  try { if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); } catch(e){}
+  try{ if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); }catch(e){}
   try{ cancelAnimationFrame(rafId); }catch(e){}
   clearInterval(timerInterval);
-  timerEl.textContent='00:00';
+  timerEl.textContent = '00:00';
 }
 
-/* when recording complete */
+/* ===== when recording stops ===== */
 async function onRecordingStop(){
   setStatus('Finalizando...');
   const blob = new Blob(recordedChunks, { type: finalMime || 'video/webm' });
-  if(!blob || blob.size < 1000){ alert('Erro: arquivo inválido'); resetAfterFail(); return; }
+  if(!blob || blob.size < 1000){ alert('Erro: arquivo inválido'); return; }
 
-  // if we already have audio+video in single file, attempt convert to mp4 with ffmpeg.wasm
-  // convert only if user requested MP4 or always (we'll convert)
+  // Attempt MP4 conversion via ffmpeg.wasm
+  setStatus('Convertendo para MP4 (local)...');
+  showProgress(3);
+
   try {
-    // show progress UI
-    progressBar.style.display='block'; setProgress(5); setStatus('Convertendo para MP4 (local, pode demorar)...');
-
     const mp4Url = await convertToMp4WithFFmpeg(blob);
     if(mp4Url){
-      // success: provide mp4 download
-      setStatus('MP4 pronto — toque em Salvar / Baixar');
-      showPreview('video', mp4Url);
       currentBlobUrl = mp4Url;
       currentFileName = `video_${Date.now()}.mp4`;
       document.getElementById('downloadBtn').href = mp4Url;
       document.getElementById('downloadBtn').download = currentFileName;
-      progressBar.style.display='none';
+      showPreview('video', mp4Url);
+      setStatus('MP4 pronto — toque em Salvar');
+      hideProgress();
       return;
     } else {
-      // conversion failed -> fallback to webm
-      setStatus('Conversão falhou, fornecendo WebM');
-      const webmUrl = URL.createObjectURL(blob);
-      showPreview('video', webmUrl);
-      currentBlobUrl = webmUrl;
-      currentFileName = `video_${Date.now()}.webm`;
-      document.getElementById('downloadBtn').href = webmUrl;
+      // fallback to webm
+      const url = URL.createObjectURL(blob);
+      currentBlobUrl = url; currentFileName = `video_${Date.now()}.webm`;
+      document.getElementById('downloadBtn').href = url;
       document.getElementById('downloadBtn').download = currentFileName;
-      progressBar.style.display='none';
+      showPreview('video', url);
+      setStatus('Conversão falhou — WebM disponível');
+      hideProgress();
       return;
     }
   } catch(err){
     console.error('conversion error', err);
-    progressBar.style.display='none';
-    // fallback to webm
     const url = URL.createObjectURL(blob);
-    showPreview('video', url);
-    currentBlobUrl = url;
-    currentFileName = `video_${Date.now()}.webm`;
+    currentBlobUrl = url; currentFileName = `video_${Date.now()}.webm`;
     document.getElementById('downloadBtn').href = url;
     document.getElementById('downloadBtn').download = currentFileName;
-    setStatus('Erro na conversão local. Arquivo WebM disponível.');
+    showPreview('video', url);
+    setStatus('Erro na conversão local. WebM disponível.');
+    hideProgress();
   }
 }
 
-/* ===== show preview (video/image) ===== */
+/* ===== preview and download helpers ===== */
 function showPreview(type, url){
-  if(type==='video'){
-    videoPreview.src = url;
-    videoPreview.style.display='block';
-    videoPreview.play().catch(()=>{});
-  } else {
-    // image preview: create canvasPreview shown? For simplicity reuse videoPreview
-    videoPreview.src = url;
-    videoPreview.style.display='block';
-  }
+  videoPreview.src = url; videoPreview.style.display = 'block'; videoPreview.play().catch(()=>{});
 }
 
-/* ===== download helper (attempt trigger) ===== */
-function downloadBlobUrl(url, filename){
+function triggerDownload(url, filename){
   try {
     const a = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  } catch(e){ console.warn('download failed', e); }
+    // keep url for manual download preview
+    document.getElementById('downloadBtn').href = url;
+    document.getElementById('downloadBtn').download = filename;
+  } catch(e){
+    console.warn('download failed', e);
+  }
 }
 
-/* ===== FFmpeg WASM integration ===== */
+/* ===== ffmpeg.wasm integration ===== */
 async function ensureFFmpeg(){
   if(ffmpegLoaded) return;
   setStatus('Carregando ffmpeg.wasm (pode demorar)...');
-  progressBar.style.display='block'; setProgress(2);
+  progressBar.style.display='block'; showProgress(5);
 
-  // load script
   if(!window.FFmpeg && !window.createFFmpeg){
-    await new Promise((resolve,reject)=>{
+    // load official script
+    await new Promise((res, rej)=>{
       const s = document.createElement('script');
       s.src = 'https://unpkg.com/@ffmpeg/ffmpeg@0.11.8/dist/ffmpeg.min.js';
-      s.onload = resolve; s.onerror = reject;
+      s.onload = res; s.onerror = rej;
       document.head.appendChild(s);
     });
   }
 
-  // create ffmpeg instance
-  const { createFFmpeg, fetchFile } = window.FFmpeg || window;
-  if(!createFFmpeg) throw new Error('FFmpeg not available in this environment');
-  ffmpeg = createFFmpeg({ log: true, corePath: 'https://unpkg.com/@ffmpeg/core@0.11.1/dist/ffmpeg-core.js' });
-  ffmpeg.setProgress(p => {
-    if(p && p.ratio) setProgress(Math.round(p.ratio*80)); // map to 0-80
-  });
+  const { createFFmpeg } = window.FFmpeg || window;
+  if(!createFFmpeg) throw new Error('FFmpeg not available');
+
+  ffmpeg = createFFmpeg({ log: false, corePath: 'https://unpkg.com/@ffmpeg/core@0.11.1/dist/ffmpeg-core.js' });
+  ffmpeg.setProgress(p => { if(p && p.ratio) showProgress(Math.round(p.ratio*80)+10); });
   await ffmpeg.load();
   ffmpegLoaded = true;
   setStatus('ffmpeg.wasm carregado');
-  setProgress(10);
+  showProgress(12);
 }
 
-/* try convert webm blob => mp4 (H264 + AAC) using ffmpeg.wasm */
 async function convertToMp4WithFFmpeg(webmBlob){
   try {
     await ensureFFmpeg();
@@ -342,67 +324,56 @@ async function convertToMp4WithFFmpeg(webmBlob){
     return null;
   }
 
-  const inputName = 'input.webm';
-  const outputName = 'output.mp4';
-
-  // write file
-  const buffer = await webmBlob.arrayBuffer();
-  ffmpeg.FS('writeFile', inputName, new Uint8Array(buffer));
-  setStatus('Executando ffmpeg (transcodificando) — isso pode levar tempo...');
-  // try libx264 + aac first
+  const inName = 'in.webm';
+  const outName = 'out.mp4';
+  const array = new Uint8Array(await webmBlob.arrayBuffer());
+  ffmpeg.FS('writeFile', inName, array);
+  setStatus('Transcodificando — aguarde...');
   try {
-    await ffmpeg.run('-i', inputName, '-c:v','libx264','-preset','veryfast','-c:a','aac','-b:a','128k','-movflags','+faststart', outputName);
-  } catch (err1) {
-    console.warn('libx264 transcode failed, trying copy fallback', err1);
-    // try copy (may produce unsupported container) => attempt fallback to mp4 copy
+    // try H.264/AAC transcode
+    await ffmpeg.run('-i', inName, '-c:v','libx264','-preset','veryfast','-c:a','aac','-b:a','128k','-movflags','+faststart', outName);
+  } catch(err){
+    console.warn('libx264 transcode failed, trying copy fallback', err);
     try {
-      await ffmpeg.run('-i', inputName, '-c', 'copy', outputName);
+      await ffmpeg.run('-i', inName, '-c','copy', outName);
     } catch(err2){
       console.error('copy fallback failed', err2);
-      // cleanup
-      try { ffmpeg.FS('unlink', inputName); } catch(e){}
+      try { ffmpeg.FS('unlink', inName); } catch(e){}
       return null;
     }
   }
 
-  // read output
-  const outData = ffmpeg.FS('readFile', outputName);
+  const outData = ffmpeg.FS('readFile', outName);
   const outBlob = new Blob([outData.buffer], { type: 'video/mp4' });
   const outUrl = URL.createObjectURL(outBlob);
 
   // cleanup
-  try { ffmpeg.FS('unlink', inputName); ffmpeg.FS('unlink', outputName); } catch(e){}
-  setProgress(100);
+  try { ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName); } catch(e){}
   return outUrl;
 }
 
-/* ===== utilities ===== */
+/* ===== progress UI ===== */
+function showProgress(p){ progressInner.style.width = `${p}%`; progressBar.style.display='block'; }
+function hideProgress(){ progressBar.style.display='none'; progressInner.style.width='0%'; }
+
+/* ===== other helpers ===== */
 function setStatus(t){ status.innerText = t; }
-function setProgress(p){ progressBarInner.style.width = `${p}%`; }
+function flash(){ const f=document.getElementById('flash'); if(!f) return; f.style.opacity=1; setTimeout(()=>f.style.opacity=0,150); }
 
-/* ===== helpers for failure ===== */
-function resetAfterFail(){
-  setStatus('Erro — reinicie câmera');
-  try{ if(stream) stream.getTracks().forEach(t=>t.stop()); }catch(e){}
-}
-
-/* ===== small UX helpers ===== */
-function flash(){ const f=document.getElementById('flash'); f.style.opacity=1; setTimeout(()=>f.style.opacity=0,150); }
-
-/* ===== expose function to upload to server (optional) - used when ffmpeg wasm fails) ===== */
+/* ===== optional server upload (fallback) ===== */
 async function uploadMergeServer(videoBlob, audioBlob=null){
   if(!MERGE_SERVER) throw new Error('MERGE_SERVER não configurado');
-  setStatus('Enviando ao servidor para mesclar (aguarde)...');
+  setStatus('Enviando ao servidor para mesclar...');
   const fd = new FormData();
   fd.append('video', videoBlob, 'video.webm');
   if(audioBlob) fd.append('audio', audioBlob, 'audio.webm');
-  const r = await fetch(MERGE_SERVER, { method:'POST', body:fd });
-  if(!r.ok) throw new Error('Servidor retornou erro '+r.status);
-  const resBlob = await r.blob();
-  const url = URL.createObjectURL(resBlob);
+  const r = await fetch(MERGE_SERVER, { method:'POST', body: fd });
+  if(!r.ok) throw new Error('Servidor retornou erro ' + r.status);
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
   return url;
 }
-
 </script>
+
 </body>
 </html>
