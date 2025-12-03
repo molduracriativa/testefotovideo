@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V11 - Final</title>
+  <title>Crispoparte V12 - FINAL (Sem Áudio no Vídeo)</title>
   <style>
     :root {
       --accent: #25D366;
@@ -217,12 +217,10 @@
     
     // Listener de Download (Apenas para garantir que o link só funcione quando tiver conteúdo)
     downloadBtn.addEventListener('click', (e) => {
-        // Se ainda não tem href definido ou é apenas '#', alerta.
         if (!downloadBtn.href || downloadBtn.href.includes('#')) {
             e.preventDefault();
             alert("Aguarde a finalização do processamento antes de clicar.");
         }
-        // Caso contrário, deixa o link funcionar para visualização (com download definido)
     });
 
 
@@ -233,27 +231,27 @@
             return;
         }
 
-        const typeText = currentFileType === 'image' ? 'a Foto' : 'o Vídeo';
+        const typeText = currentFileType === 'image' ? 'A Foto' : 'O Vídeo';
 
         const instructions = `
-        Atenção: O compartilhamento direto via WhatsApp falhou devido a restrições de segurança do seu aparelho.
+        Instrução de Compartilhamento Manual:
 
         ✅ ${typeText} foi SALVO como "${currentFileName}" na sua galeria (pasta "Download" ou "Filmes").
 
         ---
         
-        Siga estes passos para compartilhar:
+        Siga estes passos:
         
         1. Saia desta tela.
-        2. Abra o WhatsApp.
-        3. Selecione o contato.
-        4. Clique no ícone de Anexo (📎).
-        5. Escolha Galeria/Fotos ou Documentos e encontre o arquivo "${currentFileName}".
+        2. Abra o WhatsApp/Instagram.
+        3. No aplicativo, escolha a opção Anexar/Compartilhar.
+        4. Encontre o arquivo "${currentFileName}" na sua Galeria.
+        
+        Se o compartilhamento manual falhar com este vídeo, o problema é o codec.
         `;
 
         alert(instructions);
         
-        // Reinicia a câmera após o usuário ter lido a instrução
         resetCamera();
     }
 
@@ -374,11 +372,10 @@
         };
         loop();
 
+        // CRÍTICO: Captura o stream do canvas (apenas vídeo, sem áudio do mic)
         const canvasStream = canvasFinal.captureStream(30);
         
-        if (stream && stream.getAudioTracks().length > 0) {
-            canvasStream.addTrack(stream.getAudioTracks()[0]);
-        }
+        // As linhas de áudio foram removidas
 
         const preferredMimeTypes = [
             'video/mp4;codecs=avc1.42001E', 
@@ -444,7 +441,7 @@
       showResult('video', blob);
     }
 
-    // --- Lógica de Resultado e Download (Correção de Salvar na Galeria) ---
+    // --- Lógica de Resultado e Download ---
 
     function showResult(type, blob = null) {
       video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
@@ -472,8 +469,7 @@
           currentBlobUrl = videoPreview.src; // URL de preview
       }
       
-      // 3. CRÍTICO: Executa o download imediatamente após a criação do blob
-      // Isso é o que garante que o arquivo vá para a galeria
+      // 3. CRÍTICO: Executa o download imediatamente após a criação do blob (Salva na Galeria)
       const tempUrl = URL.createObjectURL(blob);
       const tempLink = document.createElement('a');
       tempLink.style.display = 'none';
@@ -483,10 +479,9 @@
       document.body.appendChild(tempLink);
       tempLink.click();
       document.body.removeChild(tempLink);
-      // Revoga a URL do download forçado (a URL do preview fica em currentBlobUrl)
       URL.revokeObjectURL(tempUrl); 
       
-      // 4. Atualiza o botão DownloadBtn para ser o link de visualização e indicar sucesso
+      // 4. Atualiza o botão DownloadBtn
       downloadBtn.href = currentBlobUrl || '#'; 
       downloadBtn.download = currentFileName; 
       downloadBtn.innerText = `✅ Salvo! Clique para Visualizar`;
