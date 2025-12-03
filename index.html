@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Crispoparte V5 - Final Estável</title>
+  <title>Crispoparte V6 - Final</title>
   <style>
     :root {
       --accent: #25D366;
@@ -165,6 +165,7 @@
     
     let finalMimeType = null;
     let finalFileExtension = null;
+    let currentBlobUrl = null; // <-- NOVO: Rastreia a URL atual do objeto para revogar (limpar cache)
 
     // --- DOM Elements ---
     const video = document.getElementById('camera');
@@ -332,7 +333,7 @@
 
         // Tenta formatos compatíveis em ordem decrescente (MP4 é a prioridade)
         const preferredMimeTypes = [
-            'video/mp4;codecs=avc1.42001E', // Padrão H.264 seguro para iOS/Android
+            'video/mp4;codecs=avc1.42001E', 
             'video/mp4',                   
             'video/webm;codecs=vp9',       
             'video/webm;codecs=vp8',       
@@ -387,7 +388,7 @@
     }
 
     function finishVideo() {
-      // CORREÇÃO: Simplifica o MIME Type para aumentar a compatibilidade com o sistema de arquivos (resolve o erro de "não foi possível enviar")
+      // Simplifica o MIME Type para o Blob
       const simpleMimeType = finalMimeType ? finalMimeType.split(';')[0] : 'video/webm';
       const blob = new Blob(recordedChunks, { type: simpleMimeType }); 
       
@@ -397,6 +398,78 @@
     }
 
     // --- Helpers ---
+
+    function showResult(type, blob = null) {
+      video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
+      resultUI.style.display = 'flex'; document.getElementById('postCaptureActions').style.display = 'flex';
+      
+      const dBtn = document.getElementById('downloadBtn');
+      const timestamp = Date.now(); // Gera timestamp único
+
+      // REVOGA A URL ANTERIOR PARA EVITAR CACHE DE DOWNLOAD
+      if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(currentBlobUrl); 
+      }
+      currentBlobUrl = null;
+
+      if (type === 'image') {
+          canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
+          const url = canvasFinal.toDataURL('image/png');
+          currentBlobUrl = url;
+          dBtn.href = url; 
+          dBtn.download = `foto_${timestamp}.png`; // Nome de arquivo único
+          sBtn.onclick = () => shareFile(url, `foto_${timestamp}.png`, 'image/png');
+      } else {
+          canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
+          
+          const ext = finalFileExtension || 'webm'; 
+          const url = URL.createObjectURL(blob);
+          currentBlobUrl = url; // Armazena a nova URL
+          
+          dBtn.href = url; 
+          dBtn.download = `video_${timestamp}.${ext}`; // Nome de arquivo único
+          
+          sBtn.onclick = () => shareFile(blob, `video_${timestamp}.${ext}`, blob.type); 
+      }
+    }
+
+
+    async function shareFile(data, name, type) {
+        let file;
+        if(typeof data === 'string') {
+            const blob = await (await fetch(data)).blob();
+            file = new File([blob], name, { type: type });
+        } else {
+            file = new File([data], name, { type: type });
+        }
+        
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            navigator.share({ files: [file], title: 'Crispoparte' }).catch(e => {
+                console.error("Erro no compartilhamento nativo:", e);
+                alert("Falha no compartilhamento nativo (limitação do aparelho/SO). Iniciando o download...");
+                document.getElementById('downloadBtn').click();
+            });
+        } else {
+            alert("Compartilhamento não suportado. Iniciando o download...");
+            document.getElementById('downloadBtn').click();
+        }
+    }
+
+    function resetCamera() {
+      // REVOGA A URL DO OBJETO QUANDO VOLTA PARA A CÂMERA
+      if (currentBlobUrl && currentBlobUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(currentBlobUrl);
+      }
+      currentBlobUrl = null;
+
+      canvasPreview.style.display = 'none'; videoPreview.style.display = 'none'; videoPreview.pause();
+      video.style.display = 'block'; molduraPreview.style.display = 'block';
+      resultUI.style.display = 'none'; cameraUI.style.display = 'flex';
+      errorMsg.innerText = "";
+    }
+    
+    // --- Funções de Gravação e Desenho (Mantidas) ---
+
     function updateTimer() {
         const diff = Math.floor((Date.now() - recordingStartTime) / 1000);
         const m = Math.floor(diff / 60).toString().padStart(2,'0');
@@ -433,59 +506,6 @@
     function flashEffect() {
         const f = document.getElementById('flash');
         f.style.opacity = '1'; setTimeout(() => f.style.opacity = '0', 150);
-    }
-
-    function showResult(type, blob = null) {
-      video.style.display = 'none'; molduraPreview.style.display = 'none'; cameraUI.style.display = 'none';
-      resultUI.style.display = 'flex'; document.getElementById('postCaptureActions').style.display = 'flex';
-      
-      const dBtn = document.getElementById('downloadBtn');
-      const sBtn = document.getElementById('shareBtn');
-
-      if (type === 'image') {
-          canvasPreview.style.display = 'block'; videoPreview.style.display = 'none';
-          const url = canvasFinal.toDataURL('image/png');
-          dBtn.href = url; dBtn.download = 'foto.png';
-          sBtn.onclick = () => shareFile(url, 'foto.png', 'image/png');
-      } else {
-          canvasPreview.style.display = 'none'; videoPreview.style.display = 'block';
-          
-          const ext = finalFileExtension || 'webm'; 
-          const url = URL.createObjectURL(blob);
-          dBtn.href = url; dBtn.download = `video.${ext}`;
-          
-          sBtn.onclick = () => shareFile(blob, `video.${ext}`, blob.type); 
-      }
-    }
-
-    async function shareFile(data, name, type) {
-        let file;
-        if(typeof data === 'string') {
-            const blob = await (await fetch(data)).blob();
-            file = new File([blob], name, { type: type });
-        } else {
-            file = new File([data], name, { type: type });
-        }
-        
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            navigator.share({ files: [file], title: 'Crispoparte' }).catch(e => {
-                console.error("Erro no compartilhamento nativo:", e);
-                // INFORMAÇÃO MELHORADA: Se o compartilhamento nativo falhar, alerta o usuário
-                alert("Falha no compartilhamento nativo (limitação do aparelho/SO). Iniciando o download...");
-                document.getElementById('downloadBtn').click();
-            });
-        } else {
-            // Se o aparelho não suportar o compartilhamento, força o download
-            alert("Compartilhamento não suportado. Iniciando o download...");
-            document.getElementById('downloadBtn').click();
-        }
-    }
-
-    function resetCamera() {
-      canvasPreview.style.display = 'none'; videoPreview.style.display = 'none'; videoPreview.pause();
-      video.style.display = 'block'; molduraPreview.style.display = 'block';
-      resultUI.style.display = 'none'; cameraUI.style.display = 'flex';
-      errorMsg.innerText = "";
     }
   </script>
 </body>
